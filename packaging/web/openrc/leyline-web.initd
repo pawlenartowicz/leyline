@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+# Multi-instance via symlink: ln -s leyline-web /etc/init.d/leyline-web.mysite
+# then `rc-service leyline-web.mysite start`. Instance name = suffix after the dot.
+instance="${RC_SVCNAME#*.}"
+[ "$instance" = "$RC_SVCNAME" ] && instance="default"
+
+name="leyline-web ($instance)"
+description="Leyline web reader instance"
+
+command="/usr/bin/leyline-web"
+command_args="-config /opt/leyline-web/$instance/config/config.yaml"
+command_user="leyline:leyline"
+directory="/opt/leyline-web/$instance"
+command_background=true
+pidfile="/run/leyline-web.$instance.pid"
+output_log="/var/log/leyline-web.$instance.log"
+error_log="/var/log/leyline-web.$instance.log"
+
+depend() {
+	need net
+	after firewall
+}

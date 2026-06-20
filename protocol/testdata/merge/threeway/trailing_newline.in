@@ -1,0 +1,5 @@
+{
+  "base": "line1\nline2\n",
+  "server": "line1\nline2\nline3\n",
+  "client": "line1\nline2\nline3\n"
+}

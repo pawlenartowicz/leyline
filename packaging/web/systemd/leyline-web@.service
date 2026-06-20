@@ -1,0 +1,35 @@
+[Unit]
+Description=leyline-web reader instance %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=leyline
+Group=leyline
+WorkingDirectory=/opt/leyline-web/%i
+ExecStart=/usr/bin/leyline-web -config /opt/leyline-web/%i/config/config.yaml
+Restart=on-failure
+RestartSec=2
+
+# Hardening (mirrors the web template's plain unit). PDF/search caches go to
+# /var/cache/leyline-web/{pdf,search}: the engine derives them from
+# XDG_CACHE_HOME, and CacheDirectory= keeps that tree writable under
+# ProtectSystem=strict and owned by leyline:leyline. The instance reads its
+# config/themes under /opt/leyline-web/%i and the vault FS read-only — no
+# ReadWritePaths needed beyond the cache.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+CacheDirectory=leyline-web
+Environment=XDG_CACHE_HOME=/var/cache
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+{
+  "base": "line 1\nline 2\nline 3\n",
+  "server": "line 1\nSERVER\nline 3\n",
+  "client": "line 1\nLOCAL\nline 3\n",
+  "hint": "serverKeyname=alice clientKeyname=you ts=2026-05-15T14:23:11Z"
+}

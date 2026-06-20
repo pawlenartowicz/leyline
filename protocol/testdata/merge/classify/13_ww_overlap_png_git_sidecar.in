@@ -1,0 +1,5 @@
+{
+  "catchup": {"seq": 13, "type": "write", "path": "img.png", "data": "server bytes treated as text\n", "ts": 1700000000},
+  "staged":  {"seq": 13, "type": "write", "path": "img.png", "data": "client bytes treated as text\n", "ts": 1700000001},
+  "ctx": {"base": "original\n", "diff_mode": "git", "server_keyname": "alice", "client_keyname": "bob", "ts": "2026-05-15T14:23:11Z"}
+}

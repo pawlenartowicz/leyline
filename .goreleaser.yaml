@@ -1,0 +1,130 @@
+version: 2
+
+project_name: leyline
+
+builds:
+  # linux only — the cli daemon (internal/cli/daemon) uses unix-only syscalls
+  # (flock, unix sockets), so darwin/windows builds need source work first.
+  # All four binaries are pinned to 0.1.0 (rebuild-in-place under plain v0.1.0;
+  # no -N suffix). Keep the four ldflags lines below in sync.
+  - id: leyline
+    main: ./cmd/leyline
+    binary: leyline
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/pawlenartowicz/leyline/internal/buildinfo.Value=0.1.0
+  - id: leyline-server
+    main: ./cmd/server
+    binary: leyline-server
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/pawlenartowicz/leyline/internal/buildinfo.Value=0.1.0
+  - id: leyline-admin
+    main: ./cmd/leyline-admin
+    binary: leyline-admin
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/pawlenartowicz/leyline/internal/buildinfo.Value=0.1.0
+  - id: leyline-web
+    main: ./cmd/leyline-web
+    binary: leyline-web
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/pawlenartowicz/leyline/internal/buildinfo.Value=0.1.0
+
+archives:
+  # One archive per release component. Names are pinned to the pre-consolidation
+  # filenames (project_name is now `leyline` for all builds, so the prefix can't
+  # come from .ProjectName) — `leyline-admin update` and curl URLs match by exact
+  # asset name. The server archive carries both server-box binaries.
+  - id: leyline
+    ids: [leyline]
+    name_template: 'leyline_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats: [tar.gz]
+  - id: leyline-server
+    ids: [leyline-server, leyline-admin]
+    name_template: 'leyline-server_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats: [tar.gz]
+  - id: leyline-web
+    ids: [leyline-web]
+    name_template: 'leyline-web_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats: [tar.gz]
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  prerelease: false
+
+nfpms:
+  - id: leyline-server
+    package_name: leyline-server
+    file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Arch }}'
+    ids: [leyline-server, leyline-admin]
+    vendor: pawlenartowicz
+    homepage: https://github.com/pawlenartowicz/leyline
+    maintainer: pawlenartowicz <noreply@leyline.ink>
+    description: leyline-server — WebSocket sync + REST admin for Obsidian vaults
+    license: AGPL-3.0-or-later
+    formats: [deb, rpm, apk]
+    bindir: /usr/bin
+    # revert/restore/GC shell out to the git binary at runtime (internal/server/storage/git.go).
+    dependencies:
+      - git
+    contents:
+      - src: packaging/server/systemd/leyline-server.service
+        dst: /usr/lib/systemd/system/leyline-server.service
+      - src: deploy/example/sysctl/99-leyline.conf
+        dst: /usr/lib/sysctl.d/99-leyline.conf
+      - src: deploy/example/journald/00-disk-cap.conf
+        dst: /usr/lib/systemd/journald.conf.d/00-leyline-disk-cap.conf
+      - src: packaging/server/openrc/leyline-server.initd
+        dst: /etc/init.d/leyline-server
+        file_info: { mode: 0755 }
+        packager: apk
+      - src: packaging/server/config.yaml
+        dst: /etc/leyline/config.yaml
+        type: config|noreplace
+        file_info: { mode: 0644 }
+    scripts:
+      preinstall: packaging/server/scripts/preinstall.sh
+      postinstall: packaging/server/scripts/postinstall.sh
+      postremove: packaging/server/scripts/postremove.sh
+    apk:
+      scripts:
+        postupgrade: packaging/server/scripts/postupgrade.sh
+  - id: leyline-web
+    package_name: leyline-web
+    # Pin the filename so the curl URLs and `leyline-admin update` asset lookup
+    # match exactly. Default nfpm naming yields x86_64 + an extra _linux_ segment.
+    file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Arch }}'
+    ids: [leyline-web]
+    vendor: pawlenartowicz
+    homepage: https://github.com/pawlenartowicz/leyline
+    maintainer: pawlenartowicz <noreply@leyline.ink>
+    description: leyline-web — read-only web view for Obsidian vaults
+    license: AGPL-3.0-or-later
+    formats: [deb, rpm, apk]
+    bindir: /usr/bin
+    contents:
+      - src: packaging/web/systemd/leyline-web@.service
+        dst: /usr/lib/systemd/system/leyline-web@.service
+      - src: packaging/web/openrc/leyline-web.initd
+        dst: /etc/init.d/leyline-web
+        file_info: { mode: 0755 }
+        packager: apk
+    scripts:
+      preinstall: packaging/web/scripts/preinstall.sh
+      postinstall: packaging/web/scripts/postinstall.sh

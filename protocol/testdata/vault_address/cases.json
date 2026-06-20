@@ -1,0 +1,112 @@
+[
+  {
+    "name": "bare-canonical",
+    "input": "example.com/research",
+    "want_host": "example.com",
+    "want_vault_id": "research",
+    "want_normalized": "example.com/research",
+    "want_dial_url": "wss://example.com/_leyline/sync/research",
+    "want_api_url": "https://example.com",
+    "want_error": ""
+  },
+  {
+    "name": "wss-prefix",
+    "input": "wss://example.com/research",
+    "want_host": "example.com",
+    "want_vault_id": "research",
+    "want_normalized": "example.com/research",
+    "want_dial_url": "wss://example.com/_leyline/sync/research",
+    "want_api_url": "https://example.com",
+    "want_error": ""
+  },
+  {
+    "name": "https-prefix",
+    "input": "https://example.com/research",
+    "want_host": "example.com",
+    "want_vault_id": "research",
+    "want_normalized": "example.com/research",
+    "want_dial_url": "wss://example.com/_leyline/sync/research",
+    "want_api_url": "https://example.com",
+    "want_error": ""
+  },
+  {
+    "name": "http-prefix-trailing-slash",
+    "input": "http://localhost:8080/test-vault/",
+    "want_host": "localhost:8080",
+    "want_vault_id": "test-vault",
+    "want_normalized": "localhost:8080/test-vault",
+    "want_dial_url": "wss://localhost:8080/_leyline/sync/test-vault",
+    "want_api_url": "https://localhost:8080",
+    "want_error": ""
+  },
+  {
+    "name": "trailing-query-and-fragment",
+    "input": "example.com/v1?token=secret#section",
+    "want_host": "example.com",
+    "want_vault_id": "v1",
+    "want_normalized": "example.com/v1",
+    "want_dial_url": "wss://example.com/_leyline/sync/v1",
+    "want_api_url": "https://example.com",
+    "want_error": ""
+  },
+  {
+    "name": "leading-whitespace",
+    "input": "  example.com/v1  ",
+    "want_host": "example.com",
+    "want_vault_id": "v1",
+    "want_normalized": "example.com/v1",
+    "want_dial_url": "wss://example.com/_leyline/sync/v1",
+    "want_api_url": "https://example.com",
+    "want_error": ""
+  },
+  {
+    "name": "host-with-port",
+    "input": "frog.example.org:9001/integration",
+    "want_host": "frog.example.org:9001",
+    "want_vault_id": "integration",
+    "want_normalized": "frog.example.org:9001/integration",
+    "want_dial_url": "wss://frog.example.org:9001/_leyline/sync/integration",
+    "want_api_url": "https://frog.example.org:9001",
+    "want_error": ""
+  },
+  {
+    "name": "empty",
+    "input": "",
+    "want_error": "empty vault address"
+  },
+  {
+    "name": "whitespace-only",
+    "input": "   ",
+    "want_error": "empty vault address"
+  },
+  {
+    "name": "host-only",
+    "input": "example.com",
+    "want_error": "vault address must be host/vaultID"
+  },
+  {
+    "name": "missing-vault-id",
+    "input": "example.com/",
+    "want_error": "vault address must be host/vaultID"
+  },
+  {
+    "name": "leading-slash",
+    "input": "/example.com/v1",
+    "want_error": "vault address must be host/vaultID"
+  },
+  {
+    "name": "uppercase-vault-id",
+    "input": "example.com/Research",
+    "want_error": "vault id must be lowercase alphanumeric"
+  },
+  {
+    "name": "vault-id-with-bang",
+    "input": "example.com/research!",
+    "want_error": "vault id must be lowercase alphanumeric"
+  },
+  {
+    "name": "extra-path-segment",
+    "input": "example.com/v1/extra",
+    "want_error": "single slash"
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "base": "",
+  "server": "",
+  "client": "a := 1 */ b := 2\nx /* y",
+  "hint": "style=block openclose=\"/* */\" serverKeyname=alice clientKeyname=you ts=2026-05-15T14:23:11Z"
+}

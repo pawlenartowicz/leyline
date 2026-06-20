@@ -1,0 +1,37 @@
+# Built binaries (root-level only — never matches cmd/*/ sources)
+/leyline
+/leyline-server
+/leyline-admin
+/leyline-web
+/server
+/gen-chroma-css
+
+# GoReleaser build output
+/dist/
+
+# Local runtime config with secrets (root only; packaging/server/config.yaml is tracked)
+/config.yaml
+
+# Local vault data
+/vaults/
+
+# Databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Test artifacts
+*.test
+*.out
+*.prof
+coverage.out
+coverage.html
+
+# Smoke-test env (live API key)
+.env.smoke
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp

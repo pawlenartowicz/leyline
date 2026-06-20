@@ -1,0 +1,5 @@
+{
+  "catchup": {"seq": 20, "type": "delete", "path": "x.py", "ts": 1700000000},
+  "staged":  {"seq": 20, "type": "write", "path": "x.py", "data": "print('client kept')\n", "ts": 1700000001},
+  "ctx": {"base": "", "diff_mode": "leyline", "server_keyname": "alice", "client_keyname": "bob", "ts": "2026-05-15T14:23:11Z"}
+}

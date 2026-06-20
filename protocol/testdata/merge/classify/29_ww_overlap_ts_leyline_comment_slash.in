@@ -1,0 +1,5 @@
+{
+  "catchup": {"seq": 29, "type": "write", "path": "module.ts", "data": "export const x = 'server';\n", "ts": 1700000000},
+  "staged":  {"seq": 29, "type": "write", "path": "module.ts", "data": "export const x = 'client';\n", "ts": 1700000001},
+  "ctx": {"base": "export const x = 'orig';\n", "diff_mode": "leyline", "server_keyname": "alice", "client_keyname": "bob", "ts": "2026-05-15T14:23:11Z"}
+}

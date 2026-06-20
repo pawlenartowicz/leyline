@@ -1,0 +1,13 @@
+# leyline-server — packaged default config (FHS layout).
+# Installed as config-noreplace: your edits survive package upgrades.
+
+server:
+  host: 127.0.0.1
+  port: 8090
+
+vaults_dir: /var/lib/leyline/vaults
+
+# Registry is mutated on `vault create`, so it must be writable. The default is
+# <dir-of-config>/registry.toml = /etc/leyline/registry.toml, but /etc is
+# read-only under the unit's ProtectSystem=strict — point it at the state dir.
+registry: /var/lib/leyline/registry.toml

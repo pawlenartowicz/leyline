@@ -1,0 +1,6 @@
+{
+  "base": "",
+  "server": "",
+  "client": "\u003cdiv\u003ehello\u003c/div\u003e",
+  "hint": "style=block openclose=\"\u003c!-- --\u003e\" serverKeyname=alice clientKeyname=you ts=2026-05-15T14:23:11Z"
+}

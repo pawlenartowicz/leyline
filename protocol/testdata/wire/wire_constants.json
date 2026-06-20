@@ -1,0 +1,321 @@
+{
+  "protocol_version": 1,
+  "close_reason_protocol_mismatch": "expected CBOR (v1 wire)",
+  "msg_types": [
+    {
+      "name": "AUTH",
+      "id": 1
+    },
+    {
+      "name": "AUTH_OK",
+      "id": 2
+    },
+    {
+      "name": "AUTH_FAIL",
+      "id": 3
+    },
+    {
+      "name": "PING",
+      "id": 20
+    },
+    {
+      "name": "PONG",
+      "id": 21
+    },
+    {
+      "name": "ERROR",
+      "id": 22
+    },
+    {
+      "name": "TAG_CREATED",
+      "id": 23
+    },
+    {
+      "name": "TAG_DELETED",
+      "id": 24
+    },
+    {
+      "name": "HELLO",
+      "id": 30
+    },
+    {
+      "name": "PUSH_BATCH",
+      "id": 31
+    },
+    {
+      "name": "FLUSH",
+      "id": 32
+    },
+    {
+      "name": "HELLO_OK",
+      "id": 33
+    },
+    {
+      "name": "CATCHUP",
+      "id": 34
+    },
+    {
+      "name": "BOOTSTRAP",
+      "id": 35
+    },
+    {
+      "name": "PUSH_ACK",
+      "id": 36
+    },
+    {
+      "name": "BROADCAST",
+      "id": 37
+    },
+    {
+      "name": "FLUSH_ACK",
+      "id": 38
+    }
+  ],
+  "hello_states": [
+    {
+      "name": "UP_TO_DATE",
+      "value": "up_to_date"
+    },
+    {
+      "name": "CATCHUP",
+      "value": "catchup"
+    },
+    {
+      "name": "BOOTSTRAP",
+      "value": "bootstrap"
+    },
+    {
+      "name": "BASE_LOST",
+      "value": "base_lost"
+    }
+  ],
+  "push_ack_results": [
+    {
+      "name": "OK",
+      "value": "ok"
+    },
+    {
+      "name": "STALE_BASE",
+      "value": "stale_base"
+    }
+  ],
+  "op_types": [
+    {
+      "name": "WRITE",
+      "value": "write"
+    },
+    {
+      "name": "DELETE",
+      "value": "delete"
+    },
+    {
+      "name": "RENAME",
+      "value": "rename"
+    }
+  ],
+  "capabilities": [
+    {
+      "name": "SYNC_PULL",
+      "value": "sync.pull"
+    },
+    {
+      "name": "SYNC_PUSH",
+      "value": "sync.push"
+    },
+    {
+      "name": "KEYS_MANAGE",
+      "value": "keys.manage"
+    },
+    {
+      "name": "VAULT_ADMIN",
+      "value": "vault.admin"
+    },
+    {
+      "name": "HISTORY_TAG",
+      "value": "history.tag"
+    },
+    {
+      "name": "HISTORY_REVERT",
+      "value": "history.revert"
+    }
+  ],
+  "roles": [
+    {
+      "name": "ADMIN",
+      "value": "admin"
+    },
+    {
+      "name": "EDITOR",
+      "value": "editor"
+    },
+    {
+      "name": "READER",
+      "value": "reader"
+    }
+  ],
+  "error_codes": [
+    {
+      "name": "FILE_TOO_LARGE",
+      "value": "file_too_large"
+    },
+    {
+      "name": "FILE_NOT_FOUND",
+      "value": "file_not_found"
+    },
+    {
+      "name": "RATE_LIMITED",
+      "value": "rate_limited"
+    },
+    {
+      "name": "VAULT_NOT_FOUND",
+      "value": "vault_not_found"
+    },
+    {
+      "name": "PERMISSION_DENIED",
+      "value": "permission_denied"
+    },
+    {
+      "name": "INVALID_PATH",
+      "value": "invalid_path"
+    },
+    {
+      "name": "DISK_WRITE_FAILED",
+      "value": "disk_write_failed"
+    },
+    {
+      "name": "INVALID_DATA",
+      "value": "invalid_data"
+    },
+    {
+      "name": "SERVER_ERROR",
+      "value": "server_error"
+    },
+    {
+      "name": "FILE_ALREADY_EXISTS",
+      "value": "file_already_exists"
+    },
+    {
+      "name": "TYPE_NOT_ALLOWED",
+      "value": "type_not_allowed"
+    },
+    {
+      "name": "STUCK_FILE",
+      "value": "stuck_file"
+    },
+    {
+      "name": "VAULT_FULL",
+      "value": "vault_full"
+    }
+  ],
+  "cbor_keys": {
+    "envelope": {
+      "type": 0
+    },
+    "auth_msg": {
+      "client_id": 3,
+      "key": 1,
+      "plugin_version": 2,
+      "type": 0
+    },
+    "auth_ok_msg": {
+      "caps": 9,
+      "head": 10,
+      "label": 2,
+      "min_plugin_version": 6,
+      "name": 3,
+      "ping_interval": 7,
+      "ping_timeout": 8,
+      "role": 4,
+      "server_version": 5,
+      "type": 0,
+      "vault_id": 1
+    },
+    "auth_fail_msg": {
+      "min_version": 2,
+      "reason": 1,
+      "type": 0
+    },
+    "hello_msg": {
+      "base": 1,
+      "manifest_digest": 2,
+      "type": 0
+    },
+    "hello_ok_msg": {
+      "head": 2,
+      "state": 1,
+      "type": 0
+    },
+    "push_batch_msg": {
+      "base": 2,
+      "batch_id": 1,
+      "ops": 3,
+      "type": 0
+    },
+    "push_ack_msg": {
+      "batch_id": 1,
+      "new_base": 3,
+      "result": 2,
+      "type": 0
+    },
+    "catchup_msg": {
+      "from": 1,
+      "more": 4,
+      "ops": 3,
+      "to": 2,
+      "type": 0
+    },
+    "bootstrap_msg": {
+      "head": 1,
+      "more": 3,
+      "ops": 2,
+      "type": 0
+    },
+    "broadcast_msg": {
+      "from": 1,
+      "ops": 3,
+      "to": 2,
+      "type": 0
+    },
+    "flush_msg": {
+      "flush_id": 1,
+      "type": 0
+    },
+    "flush_ack_msg": {
+      "flush_id": 1,
+      "head": 2,
+      "type": 0
+    },
+    "error_msg": {
+      "code": 1,
+      "message": 2,
+      "path": 3,
+      "retry_after": 4,
+      "type": 0
+    },
+    "tag_created_msg": {
+      "by": 4,
+      "commit": 2,
+      "kind": 3,
+      "name": 1,
+      "type": 0
+    },
+    "tag_deleted_msg": {
+      "by": 3,
+      "commit": 2,
+      "name": 1,
+      "type": 0
+    },
+    "op": {
+      "author": 10,
+      "binary": 7,
+      "data": 6,
+      "from": 4,
+      "path": 3,
+      "pre_hash": 8,
+      "seq": 1,
+      "to": 5,
+      "ts": 9,
+      "type": 2
+    }
+  }
+}

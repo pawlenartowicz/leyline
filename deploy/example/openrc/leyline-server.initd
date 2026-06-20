@@ -1,0 +1,31 @@
+#!/sbin/openrc-run
+# Example openrc unit for leyline-server on Alpine. Install at /etc/init.d/leyline-server
+# (root, mode 0755), then `rc-update add leyline-server default`.
+#
+# This is a fork template. Forkers should:
+#   - Adjust paths (/opt/leyline/...) to match their layout.
+#   - Adjust command_user if they don't use a shared `leyline` user.
+#   - Confirm the config path passed via -config.
+
+name="leyline-server"
+description="Leyline sync server"
+
+command="/opt/leyline/bin/leyline-server"
+command_args="-config /opt/leyline/config.yaml"
+command_user="leyline:leyline"
+command_background=true
+pidfile="/run/leyline-server.pid"
+output_log="/var/log/leyline-server.log"
+error_log="/var/log/leyline-server.log"
+
+depend() {
+	need net
+	after firewall
+}
+
+start_pre() {
+	checkpath -d -m 0755 -o leyline:leyline /opt/leyline
+	checkpath -d -m 0755 -o leyline:leyline /opt/leyline/vaults
+	checkpath -d -m 0755 -o leyline:leyline /run/leyline
+	checkpath -f -m 0644 -o leyline:leyline /var/log/leyline-server.log
+}

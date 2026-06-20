@@ -1,0 +1,6 @@
+{
+  "base": "",
+  "server": "",
+  "client": "<a> --> <b>",
+  "hint": "style=block openclose=\"<!-- -->\" serverKeyname=alice clientKeyname=you ts=2026-05-15T14:23:11Z"
+}

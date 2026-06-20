@@ -1,0 +1,3 @@
+{
+  "alice": ["history.revert", "history.tag", "keys.manage", "sync.pull", "sync.push", "vault.admin"]
+}

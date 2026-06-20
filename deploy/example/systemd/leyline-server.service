@@ -1,0 +1,30 @@
+[Unit]
+Description=leyline-server — WebSocket sync + REST admin for Obsidian vaults
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=leyline
+Group=leyline
+WorkingDirectory=/opt/leyline
+ExecStart=/opt/leyline/bin/leyline-server -config /opt/leyline/config.yaml
+Restart=on-failure
+RestartSec=2
+
+# Logs go to stderr → journald. View with: journalctl -u leyline-server.
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/leyline/vaults
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

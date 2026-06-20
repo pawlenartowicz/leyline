@@ -1,0 +1,5 @@
+# .leyline/vaultconfig/access — vault identity and roles
+# name	role	hash	generated	last_seen	expires_at	email
+# Managed via admin API. Manual edits are supported.
+alice	admin	a1b2c3d4e5f6a1b2c3d4e5f6	2026-01-01T00:00	-	-	-
+dave	tagger	d4e5f6a1b2c3d4e5f6a1b2c3	2026-03-01T00:00	-	-	-

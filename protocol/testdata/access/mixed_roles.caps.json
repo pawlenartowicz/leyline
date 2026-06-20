@@ -1,0 +1,5 @@
+{
+  "alice": ["history.revert", "history.tag", "keys.manage", "sync.pull", "sync.push", "vault.admin"],
+  "bob": ["history.revert", "sync.pull", "sync.push"],
+  "carol": ["sync.pull"]
+}

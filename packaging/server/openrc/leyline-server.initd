@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+name="leyline-server"
+description="Leyline sync server"
+
+command="/usr/bin/leyline-server"
+command_args="-config /etc/leyline/config.yaml"
+command_user="leyline:leyline"
+command_background=true
+pidfile="/run/leyline-server.pid"
+output_log="/var/log/leyline-server.log"
+error_log="/var/log/leyline-server.log"
+
+depend() {
+	need net
+	after firewall
+}
+
+start_pre() {
+	checkpath -d -m 0750 -o leyline:leyline /var/lib/leyline
+	checkpath -d -m 0750 -o leyline:leyline /var/lib/leyline/vaults
+	checkpath -d -m 0755 -o leyline:leyline /run/leyline
+	checkpath -f -m 0644 -o leyline:leyline /var/log/leyline-server.log
+}

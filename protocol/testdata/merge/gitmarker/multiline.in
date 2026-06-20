@@ -1,0 +1,6 @@
+{
+  "base": "",
+  "server": "line A\nline B\n",
+  "client": "line X\nline Y\n",
+  "hint": "serverKeyname=alice ts=2026-05-15T14:23:11Z"
+}

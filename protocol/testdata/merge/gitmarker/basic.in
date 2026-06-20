@@ -1,0 +1,6 @@
+{
+  "base": "",
+  "server": "server's version",
+  "client": "your version",
+  "hint": "serverKeyname=alice ts=2026-05-15T14:23:11Z"
+}

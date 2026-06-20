@@ -1,0 +1,5 @@
+{
+  "catchup": {"seq": 8, "type": "write", "path": "a.md", "data": "same\n", "ts": 1700000000},
+  "staged":  {"seq": 8, "type": "write", "path": "a.md", "data": "same\n", "ts": 1700000001},
+  "ctx": {"base": "same\n", "diff_mode": "leyline", "server_keyname": "alice", "client_keyname": "bob", "ts": "2026-05-15T14:23:11Z"}
+}

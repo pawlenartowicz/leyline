@@ -1,0 +1,34 @@
+[Unit]
+Description=leyline-server — WebSocket sync + REST admin for Obsidian vaults
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=leyline
+Group=leyline
+ExecStart=/usr/bin/leyline-server -config /etc/leyline/config.yaml
+Restart=on-failure
+RestartSec=2
+
+# StateDirectory creates+owns /var/lib/leyline (and sets $STATE_DIRECTORY for the
+# WAL); RuntimeDirectory creates /run/leyline for the admin UNIX socket.
+StateDirectory=leyline
+RuntimeDirectory=leyline
+ReadWritePaths=/var/lib/leyline
+
+# Hardening. ProtectSystem=strict makes / (incl. /etc) read-only except the
+# dirs above — this is why config.yaml points registry: at /var/lib/leyline.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

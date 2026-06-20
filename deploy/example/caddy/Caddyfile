@@ -1,0 +1,35 @@
+# Caddyfile — example reverse-proxy in front of leyline-server. Replace
+# example.com with your domain.
+#
+# leyline-server exposes everything under a single /_leyline/* prefix:
+#   /_leyline/sync/{vault}    — WebSocket sync endpoint (clients and CLI)
+#   /_leyline/admin/{vault}/* — REST admin API (key management, vault reset)
+#   /_leyline/api/v1/{vault}/*— Tier 3 history REST API (tag, revert, log, diff)
+#   /_leyline/operator/*      — server-wide admin (vault create/list, status)
+#   /_leyline/healthz         — liveness probe (no auth)
+#   /_leyline/health          — JSON liveness (no auth)
+#
+# Same-domain coexistence with leyline-web (port 8091): add a catch-all
+# `reverse_proxy 127.0.0.1:8091` block AFTER this matcher in the same site,
+# and the web reader serves everything outside /_leyline/*.
+
+example.com {
+    encode zstd gzip
+
+    # WebSocket keepalive — default Caddy transport timeout is 30s, which is
+    # shorter than the leyline ping interval. Raise to avoid premature resets.
+    reverse_proxy /_leyline/* 127.0.0.1:8090 {
+        transport http {
+            dial_timeout 5s
+            response_header_timeout 0
+            read_buffer_size 32KiB
+            write_buffer_size 32KiB
+        }
+        flush_interval -1
+    }
+
+    header {
+        # Caddy adds HSTS automatically when serving HTTPS via ACME.
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    }
+}
