@@ -21,7 +21,6 @@ type Config struct {
 	Domain          string            `yaml:"domain"`
 	Listen          string            `yaml:"listen"`
 	DevMode         bool              `yaml:"dev_mode"`
-	LeylineServer   string            `yaml:"leyline_server"` // reserved; not used by the web reader
 	DefaultTheme    string            `yaml:"default_theme"`
 	TextExtensions  []string          `yaml:"text_extensions"` // extensions served as text-as-<pre> by the dispatcher
 	Vaults          map[string]string `yaml:"vaults"`

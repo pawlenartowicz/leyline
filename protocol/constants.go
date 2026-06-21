@@ -2,6 +2,13 @@ package protocol
 
 //go:generate go run ./testdata/wire/gen
 
+// MaxFrameBytes is the hard upper bound on a single decoded WebSocket frame.
+// The server sets its gorilla read limit to this (internal/server/hub/hub.go
+// SetReadLimit) and rejects any frame above it by closing the socket. The CLI
+// push path stays well under it via a smaller send budget (maxPushBatchBytes
+// in pkg/sync) — mirrors that constant; change together.
+const MaxFrameBytes = 15 << 20 // 15 MiB
+
 // ProtocolVersion is the wire-format version. The wire *is* the version —
 // no in-frame version field, no negotiation. v1 frames carry IDs 30–38
 // alongside the auth/ping/error/tag IDs (1–3, 20–24).
@@ -161,7 +168,9 @@ func IsKnownErrCode(code string) bool {
 }
 
 // Review-tag conventions. Naming:
-//   `reviewed-<RFC3339-with-dashes-instead-of-colons>`
+//
+//	`reviewed-<RFC3339-with-dashes-instead-of-colons>`
+//
 // e.g. reviewed-2026-05-18T15-04-05Z. The `-` substitution is because `:`
 // is forbidden in git refnames; the format roundtrips via Format/Parse
 // helpers below. Used by server commit naming + CLI/plugin display.

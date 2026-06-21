@@ -177,9 +177,6 @@ vaults:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.LeylineServer != "" {
-		t.Errorf("LeylineServer should default empty, got %q", cfg.LeylineServer)
-	}
 	if cfg.CacheMaxEntries != 1000 {
 		t.Errorf("CacheMaxEntries default = %d, want 1000", cfg.CacheMaxEntries)
 	}

@@ -103,7 +103,10 @@ func (r *Rules) CanSync(relPath string, size int64) (bool, string) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if !matchesAny(relPath, r.sync) {
-		return false, "file type not allowed"
+		if ext := filepath.Ext(relPath); ext != "" {
+			return false, fmt.Sprintf("file type not allowed: %s", ext)
+		}
+		return false, "file type not allowed (no extension)"
 	}
 	if r.syncLimit > 0 && size > r.syncLimit {
 		return false, fmt.Sprintf("file too large (limit %d bytes)", r.syncLimit)

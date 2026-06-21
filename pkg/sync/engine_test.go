@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1331,7 +1332,7 @@ func TestEngineBinaryDeleteVsEdit_RecordsMainPathAbsent(t *testing.T) {
 	rel := "diagram.png"
 	// Local state: client wrote binary content; the write is staged and on disk.
 	binaryData := []byte{0x89, 0x50, 0x4E, 0x47, 0x00, 0x01, 0x02} // PNG magic + NUL
-	preContent := []byte{0x89, 0x50, 0x4E, 0x47, 0x00}            // earlier base bytes
+	preContent := []byte{0x89, 0x50, 0x4E, 0x47, 0x00}             // earlier base bytes
 	if err := f.baseStore.Write(rel, preContent); err != nil {
 		t.Fatalf("seed base: %v", err)
 	}
@@ -1951,6 +1952,138 @@ func TestEngineMergeBootstrap_SameContentSkipsRename(t *testing.T) {
 // engine construction. The check site itself lives in oneshot.go /
 // daemon.go, but the EngineOpts field is the contract that lets those
 // sites read the value off a single source of truth.
+// TestEnginePushChunksLargeStage drives a staged log that exceeds the
+// per-push byte budget across multiple chunks. It asserts the client
+// splits into ≥2 PushBatch frames (each encoded under the server's
+// per-frame read limit), the staged log fully drains, and Base advances
+// once per chunk.
+func TestEnginePushChunksLargeStage(t *testing.T) {
+	head0 := hashOf("HEAD-0")
+	var pushBatches []protocol.PushBatchMsg
+	f := newEngineFixture(t, func(c *websocket.Conn) {
+		recvAuth(c)
+		sendAuthOK(t, c)
+		_, _ = recvFrame(t, c) // Hello
+		sendCBOR(t, c, protocol.HelloOKMsg{
+			Type: protocol.MsgHelloOK, State: protocol.HelloStateUpToDate, Head: head0,
+		})
+		n := 0
+		for {
+			mt, msg := recvFrame(t, c)
+			switch mt {
+			case protocol.MsgPushBatch:
+				pb := msg.(*protocol.PushBatchMsg)
+				pushBatches = append(pushBatches, *pb)
+				n++
+				sendCBOR(t, c, protocol.PushAckMsg{
+					Type: protocol.MsgPushAck, BatchID: pb.BatchID,
+					Result: protocol.PushAckOK, NewBase: hashOf(fmt.Sprintf("HEAD-%d", n)),
+				})
+			case protocol.MsgFlush:
+				fm := msg.(*protocol.FlushMsg)
+				sendCBOR(t, c, protocol.FlushAckMsg{
+					Type: protocol.MsgFlushAck, FlushID: fm.FlushID,
+					Head: hashOf(fmt.Sprintf("HEAD-%d", n)),
+				})
+				return
+			default:
+				return
+			}
+		}
+	})
+	defer f.close()
+
+	prev := head0
+	f.base.Base = &prev
+	_ = stage.WriteBase(f.basePath, *f.base)
+	// 4 ops × 4 MiB = 16 MiB staged → exceeds the 12 MiB push budget,
+	// forcing the client to split into ≥2 chunks.
+	const opBytes = 4 << 20
+	for i := 0; i < 4; i++ {
+		data := make([]byte, opBytes)
+		data[0] = byte('a' + i) // distinguishable, non-zero first byte
+		_ = f.staged.Append(stage.StagedOp{Op: protocol.Op{
+			Seq: uint64(i + 1), Type: protocol.OpWrite,
+			Path: fmt.Sprintf("big-%d.bin", i), Data: data, TS: int64(i + 1),
+			Author: f.keyname, Binary: true,
+		}})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := f.newEngine(ModeSync).RunSession(ctx); err != nil {
+		t.Fatalf("RunSession: %v", err)
+	}
+
+	if len(pushBatches) < 2 {
+		t.Fatalf("PushBatch frames = %d, want >= 2 (stage exceeds one chunk)", len(pushBatches))
+	}
+	total := 0
+	for i, pb := range pushBatches {
+		enc, err := protocol.Encode(pb)
+		if err != nil {
+			t.Fatalf("encode frame %d: %v", i, err)
+		}
+		if len(enc) >= protocol.MaxFrameBytes {
+			t.Errorf("frame %d encodes %d bytes, want < MaxFrameBytes (%d)",
+				i, len(enc), protocol.MaxFrameBytes)
+		}
+		total += len(pb.Ops)
+	}
+	if total != 4 {
+		t.Errorf("total ops across frames = %d, want 4", total)
+	}
+	if got := f.staged.Snapshot(); len(got) != 0 {
+		t.Errorf("staged not drained: %d ops left", len(got))
+	}
+	want := hashOf(fmt.Sprintf("HEAD-%d", len(pushBatches)))
+	if f.base.Base == nil || *f.base.Base != want {
+		t.Errorf("Base = %v, want %v (last chunk's ack)", f.base.Base, want)
+	}
+}
+
+// TestEnginePushSingleOversizedOpErrors verifies that a single staged op
+// whose size alone exceeds the per-push budget fails loudly (naming the
+// file) instead of being packed into a frame the server would drop.
+func TestEnginePushSingleOversizedOpErrors(t *testing.T) {
+	head0 := hashOf("HEAD-0")
+	f := newEngineFixture(t, func(c *websocket.Conn) {
+		recvAuth(c)
+		sendAuthOK(t, c)
+		_, _ = recvFrame(t, c) // Hello
+		sendCBOR(t, c, protocol.HelloOKMsg{
+			Type: protocol.MsgHelloOK, State: protocol.HelloStateUpToDate, Head: head0,
+		})
+		// No PushBatch should arrive — collectPushOps errors before send.
+		_, _ = recvFrame(t, c)
+	})
+	defer f.close()
+
+	prev := head0
+	f.base.Base = &prev
+	_ = stage.WriteBase(f.basePath, *f.base)
+	// One 13 MiB op — exceeds the 12 MiB budget alone; no chunk can form.
+	data := make([]byte, 13<<20)
+	data[0] = 'z'
+	_ = f.staged.Append(stage.StagedOp{Op: protocol.Op{
+		Seq: 1, Type: protocol.OpWrite, Path: "huge.bin",
+		Data: data, TS: 1, Author: f.keyname, Binary: true,
+	}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := f.newEngine(ModeSync).RunSession(ctx)
+	if err == nil {
+		t.Fatal("RunSession: want oversized-op error, got nil")
+	}
+	if !strings.Contains(err.Error(), "huge.bin") || !strings.Contains(err.Error(), "per-push limit") {
+		t.Errorf("error = %q, want it to name the file and the per-push limit", err.Error())
+	}
+	if got := f.staged.Snapshot(); len(got) != 1 {
+		t.Errorf("staged = %d ops, want 1 (unchanged)", len(got))
+	}
+}
+
 func TestEngineBypassBulkThreshold_Plumbing(t *testing.T) {
 	e := NewEngine(EngineOpts{
 		Mode:                ModeSync,

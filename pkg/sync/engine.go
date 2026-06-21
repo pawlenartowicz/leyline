@@ -868,45 +868,65 @@ func (e *Engine) recordManifestRename(from, to string) error {
 	return e.opts.Manifest.Put(to, entry)
 }
 
-// pushIfNeeded sends a PushBatch covering every non-frozen staged op and
-// resolves the resulting PushAck. Broadcasts that arrive on the wire
-// between PushBatch send and PushAck receive are buffered and applied
-// before deciding on the next step: this prevents silent-drop of
+// pushIfNeeded sends size-bounded PushBatch slices covering the non-frozen
+// staged ops and resolves each resulting PushAck. Broadcasts that arrive on
+// the wire between PushBatch send and PushAck receive are buffered and
+// applied before deciding on the next step: this prevents silent-drop of
 // unrelated third-client commits (on PushAckOK) and enables seamless
 // retry of cross-client overlaps (on PushAckStaleBase). On stale_base
 // without buffered broadcasts, falls back to staleBaseRetry's Hello
 // roundtrip.
+//
+// The send loop drains the staged log in size-bounded slices: collect a
+// bounded prefix, push → ack → commit (which trims that slice), repeat
+// until the stage is empty. Each PushBatch is independently based-and-
+// acked, so this stays within the v1 wire — only the client splits.
 func (e *Engine) pushIfNeeded(ctx context.Context) error {
-	ops, _ := e.collectPushOps()
-	if len(ops) == 0 {
-		return nil
-	}
-	if e.opts.Base.Base == nil {
-		return errors.New("push without a base: server must Bootstrap first")
-	}
-	batchID := e.opts.Base.NextBatchID
-	if err := e.opts.Client.Send(protocol.PushBatchMsg{
-		Type:    protocol.MsgPushBatch,
-		BatchID: batchID,
-		Base:    *e.opts.Base.Base,
-		Ops:     ops,
-	}); err != nil {
-		return err
-	}
-	ack, pending, err := e.recvPushAck(ctx)
-	if err != nil {
-		return err
-	}
-	if err := e.applyPendingBroadcasts(pending); err != nil {
-		return err
-	}
-	if ack.Result == protocol.PushAckStaleBase {
-		if len(pending) > 0 {
-			return e.seamlessRetry(ctx)
+	for {
+		ops, _, err := e.collectPushOps()
+		if err != nil {
+			return err
 		}
-		return e.staleBaseRetry(ctx, ack.NewBase)
+		if len(ops) == 0 {
+			return nil
+		}
+		if e.opts.Base.Base == nil {
+			return errors.New("push without a base: server must Bootstrap first")
+		}
+		batchID := e.opts.Base.NextBatchID
+		if err := e.opts.Client.Send(protocol.PushBatchMsg{
+			Type:    protocol.MsgPushBatch,
+			BatchID: batchID,
+			Base:    *e.opts.Base.Base,
+			Ops:     ops,
+		}); err != nil {
+			return err
+		}
+		ack, pending, err := e.recvPushAck(ctx)
+		if err != nil {
+			return err
+		}
+		if err := e.applyPendingBroadcasts(pending); err != nil {
+			return err
+		}
+		if ack.Result == protocol.PushAckStaleBase {
+			// Stale-base retry re-collects a now-bounded prefix and commits
+			// one chunk; loop to drain any remainder.
+			if len(pending) > 0 {
+				if err := e.seamlessRetry(ctx); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := e.staleBaseRetry(ctx, ack.NewBase); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := e.commitPushAck(ops, ack.NewBase, batchID); err != nil {
+			return err
+		}
 	}
-	return e.commitPushAck(ops, ack.NewBase, batchID)
 }
 
 // pendingBroadcast is a buffered Broadcast frame received during a
@@ -944,7 +964,10 @@ func (e *Engine) applyPendingBroadcasts(pending []pendingBroadcast) error {
 func (e *Engine) seamlessRetry(ctx context.Context) error {
 	const maxRetries = 3
 	for i := 0; i < maxRetries; i++ {
-		ops, _ := e.collectPushOps()
+		ops, _, err := e.collectPushOps()
+		if err != nil {
+			return err
+		}
 		if len(ops) == 0 {
 			return nil
 		}
@@ -982,22 +1005,49 @@ func (e *Engine) seamlessRetry(ctx context.Context) error {
 	return errors.New("seamless retry exhausted")
 }
 
-// collectPushOps returns the live (non-frozen) staged ops for the next
-// push. The returned ops carry the same Seqs the staged log holds, so
-// post-ack the staged log can be trimmed by Seq.
-func (e *Engine) collectPushOps() ([]protocol.Op, []stage.StagedOp) {
+// maxPushBatchBytes bounds the encoded size of a single PushBatch frame.
+// Deliberately ~3 MiB under protocol.MaxFrameBytes (the server's per-frame
+// read limit) to leave room for the CBOR envelope and per-op overhead —
+// mirrors protocol.MaxFrameBytes; change together.
+const maxPushBatchBytes = 12 << 20 // 12 MiB
+
+// collectPushOps returns a size-bounded prefix of the live (non-frozen)
+// staged ops for the next push, accumulating in staged order until adding
+// the next op would exceed maxPushBatchBytes. The returned ops carry the
+// same Seqs the staged log holds, so post-ack the staged log can be
+// trimmed by Seq. The full staged snapshot is returned alongside.
+//
+// Size is measured with the cheap proxy the server uses for catchup
+// chunking (len(Data) + len(Path) + 32). When a non-frozen op exists the
+// prefix is non-empty, except when the first eligible op's own size
+// exceeds the budget — a single >12 MiB file, which no chunk can carry —
+// in which case the error names the file and no prefix is returned.
+func (e *Engine) collectPushOps() ([]protocol.Op, []stage.StagedOp, error) {
 	staged := e.opts.Staged.Snapshot()
 	if len(staged) == 0 {
-		return nil, staged
+		return nil, staged, nil
 	}
 	ops := make([]protocol.Op, 0, len(staged))
+	size := 0
 	for _, s := range staged {
 		if s.Frozen {
 			continue
 		}
+		opSize := len(s.Op.Data) + len(s.Op.Path) + 32
+		if len(ops) == 0 && opSize > maxPushBatchBytes {
+			// First eligible op is itself oversized — batching cannot help;
+			// sent alone it would still be dropped by the server.
+			return nil, staged, fmt.Errorf(
+				"file %q (%.1f MiB) exceeds the %d MiB per-push limit; add it to .leyline/leylineignore",
+				opPathFor(s.Op), float64(opSize)/(1<<20), maxPushBatchBytes>>20)
+		}
+		if len(ops) > 0 && size+opSize > maxPushBatchBytes {
+			break
+		}
 		ops = append(ops, s.Op)
+		size += opSize
 	}
-	return ops, staged
+	return ops, staged, nil
 }
 
 // recvPushAck blocks for the next PushAckMsg, draining any Broadcast
@@ -1435,7 +1485,10 @@ func (e *Engine) waitForOverlapBroadcast(ctx context.Context) (protocol.Hash, er
 // blocking again for a broadcast it already consumed. Returns
 // (nil, nil, false, nil) when there's nothing to push.
 func (e *Engine) pushOnceReturnAck(ctx context.Context) (*protocol.PushAckMsg, []protocol.Op, bool, error) {
-	ops, _ := e.collectPushOps()
+	ops, _, err := e.collectPushOps()
+	if err != nil {
+		return nil, nil, false, err
+	}
 	if len(ops) == 0 {
 		return nil, nil, false, nil
 	}

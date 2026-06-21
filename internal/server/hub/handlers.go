@@ -262,9 +262,9 @@ func (h *Hub) handlePushBatch(c *Client, vs *VaultState, msg *protocol.PushBatch
 				}
 				break
 			}
-			if ok, _ := vs.rules.CanSync(op.Path, 0); !ok {
+			if ok, reason := vs.rules.CanSync(op.Path, 0); !ok {
 				c.failedPushLimiter.Record()
-				c.sendError(protocol.ErrTypeNotAllowed, "file type not allowed", op.Path)
+				c.sendError(protocol.ErrTypeNotAllowed, reason, op.Path)
 				return
 			}
 			if ok, reason := vs.rules.CanSync(op.Path, int64(len(op.Data))); !ok {
@@ -286,9 +286,9 @@ func (h *Hub) handlePushBatch(c *Client, vs *VaultState, msg *protocol.PushBatch
 			if pathutil.IsSyncableControlPlanePath(op.To) {
 				break // control-plane target bypasses the extension whitelist
 			}
-			if ok, _ := vs.rules.CanSync(op.To, 0); !ok {
+			if ok, reason := vs.rules.CanSync(op.To, 0); !ok {
 				c.failedPushLimiter.Record()
-				c.sendError(protocol.ErrTypeNotAllowed, "rename target not allowed", op.To)
+				c.sendError(protocol.ErrTypeNotAllowed, "rename target "+reason, op.To)
 				return
 			}
 		case protocol.OpDelete:

@@ -1269,7 +1269,10 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		slog.Error("websocket upgrade", "vault", vaultID, "error", err)
 		return
 	}
-	conn.SetReadLimit(15 << 20)
+	// Per-frame read cap. The CLI push path stays under it via a smaller
+	// send budget (maxPushBatchBytes in pkg/sync) — mirrors
+	// protocol.MaxFrameBytes; change together.
+	conn.SetReadLimit(protocol.MaxFrameBytes)
 
 	client := newClient(h, conn, h.cfg.Sync.FailedPushRateLimit)
 	client.ip = ip
