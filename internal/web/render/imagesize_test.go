@@ -78,6 +78,42 @@ func TestRenderMarkdown_ImageSize_Wikilink(t *testing.T) {
 			want: []string{`<img`, `src="/v/a.png"`},
 			nope: []string{`width=`, `height=`},
 		},
+		{
+			name: "variant-only",
+			src:  "![[a.png|theme-dark]]\n",
+			want: []string{`<img`, `src="/v/a.png"`, `class="leyline-variant-dark"`},
+			nope: []string{`width=`, `height=`, `alt="theme-dark"`},
+		},
+		{
+			name: "variant-then-width",
+			src:  "![[a.png|theme-dark|300]]\n",
+			want: []string{`<img`, `class="leyline-variant-dark"`, `width="300"`},
+			nope: []string{`alt="theme-dark"`},
+		},
+		{
+			name: "size-then-variant",
+			src:  "![[a.png|300x200|theme-light]]\n",
+			want: []string{`<img`, `width="300"`, `height="200"`, `class="leyline-variant-light"`},
+			nope: []string{`alt="theme-light"`, `alt="300x200"`},
+		},
+		{
+			name: "alt-variant-size",
+			src:  "![[a.png|cap|theme-dark|300]]\n",
+			want: []string{`<img`, `width="300"`, `class="leyline-variant-dark"`, `cap`},
+			nope: []string{`alt="cap|theme-dark|300"`},
+		},
+		{
+			name: "variant-case-insensitive",
+			src:  "![[a.png|Theme-Dark]]\n",
+			want: []string{`<img`, `class="leyline-variant-dark"`},
+			nope: nil,
+		},
+		{
+			name: "both-variants-first-wins",
+			src:  "![[a.png|theme-dark|theme-light]]\n",
+			want: []string{`<img`, `class="leyline-variant-dark"`},
+			nope: []string{`leyline-variant-light`},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -137,6 +173,24 @@ func TestRenderMarkdown_ImageSize_StandardMarkdown(t *testing.T) {
 			src:  "![300](/v/a.png)\n",
 			want: []string{`<img`, `alt="300"`, `src="/v/a.png"`},
 			nope: []string{`width=`, `height=`},
+		},
+		{
+			name: "alt-variant",
+			src:  "![cap|theme-dark](/v/a.png)\n",
+			want: []string{`<img`, `alt="cap"`, `class="leyline-variant-dark"`},
+			nope: []string{`width=`},
+		},
+		{
+			name: "empty-alt-variant-only",
+			src:  "![|theme-light](/v/a.png)\n",
+			want: []string{`<img`, `class="leyline-variant-light"`},
+			nope: []string{`alt="theme-light"`, `alt="|theme-light"`, `width=`},
+		},
+		{
+			name: "variant-no-pipe-untouched",
+			src:  "![theme-dark](/v/a.png)\n",
+			want: []string{`<img`, `alt="theme-dark"`},
+			nope: []string{`class=`, `width=`},
 		},
 	}
 	for _, c := range cases {

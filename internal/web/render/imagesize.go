@@ -16,6 +16,11 @@ import (
 // sizeSuffixRE matches a pure size token (`300` or `300x200`).
 var sizeSuffixRE = regexp.MustCompile(`^([0-9]+)(?:x([0-9]+))?$`)
 
+// variantRE matches a theme-variant token (`theme-light` / `theme-dark`,
+// case-insensitive). The `theme-` prefix is deliberate: bare `dark` / `light`
+// are plausible real captions, whereas `theme-dark` collision is nil.
+var variantRE = regexp.MustCompile(`(?i)^theme-(light|dark)$`)
+
 // embedSizeAttrs parses a label as `N` or `NxM`. ok=false when the label
 // isn't a pure size token (caller treats the label as a caption / alt).
 func embedSizeAttrs(label []byte) (width, height int, ok bool) {
@@ -38,10 +43,69 @@ func embedSizeAttrs(label []byte) (width, height int, ok bool) {
 	return width, height, true
 }
 
-// imageSizeTransformer rewrites sized image embeds (wikilink and standard
-// markdown) into *ast.Image nodes with width/height attributes lifted off
-// the label/alt. Non-image embeds are left alone; non-numeric labels are
-// left alone (the existing wikilink renderer handles them).
+// embedLabel holds the classified pieces of an image embed's `|`-delimited
+// label. found is true when at least one size or variant segment was present —
+// i.e. the label carries something worth rewriting the node for.
+type embedLabel struct {
+	width, height int
+	hasSize       bool
+	variantClass  string // "" | "leyline-variant-dark" | "leyline-variant-light"
+	alt           []byte
+	found         bool
+}
+
+// parseEmbedLabel classifies each `|`-delimited segment of an image embed label
+// by shape — pure-size (`300`/`300x200`) → width/height, `theme-(light|dark)` →
+// variant class, anything else → alt (non-matching segments re-joined with `|`,
+// preserving captions that legitimately contain pipes). Size vs. variant order
+// is irrelevant. First size and first variant segment win; any later size or
+// variant segment falls through to alt (degenerate input, e.g. both
+// `theme-dark` and `theme-light` on one embed — the loser becomes alt text).
+func parseEmbedLabel(label []byte) embedLabel {
+	var out embedLabel
+	var altParts [][]byte
+	for _, seg := range bytes.Split(label, []byte("|")) {
+		trimmed := bytes.TrimSpace(seg)
+		if !out.hasSize {
+			if w, h, ok := embedSizeAttrs(trimmed); ok {
+				out.width, out.height, out.hasSize, out.found = w, h, true, true
+				continue
+			}
+		}
+		if out.variantClass == "" {
+			if m := variantRE.FindSubmatch(trimmed); m != nil {
+				out.variantClass = "leyline-variant-" + strings.ToLower(string(m[1]))
+				out.found = true
+				continue
+			}
+		}
+		altParts = append(altParts, seg)
+	}
+	out.alt = bytes.TrimSpace(bytes.Join(altParts, []byte("|")))
+	return out
+}
+
+// applyEmbedAttrs lifts the classified size/variant onto the rewritten image.
+// `class` renders because goldmark's ImageAttributeFilter extends
+// GlobalAttributeFilter (which allows `class`), same path as `width`/`height`.
+func applyEmbedAttrs(img *ast.Image, p embedLabel) {
+	if p.hasSize {
+		setIntAttr(img, "width", p.width)
+		if p.height > 0 {
+			setIntAttr(img, "height", p.height)
+		}
+	}
+	if p.variantClass != "" {
+		img.SetAttribute([]byte("class"), []byte(p.variantClass))
+	}
+}
+
+// imageSizeTransformer rewrites image embeds (wikilink and standard markdown)
+// into *ast.Image nodes, lifting width/height and a theme-variant class
+// (`leyline-variant-{dark,light}` from a `|theme-dark` / `|theme-light`
+// segment) off the label/alt. Non-image embeds are left alone; labels with
+// neither a size nor a variant segment are left alone (the existing wikilink
+// renderer handles them).
 //
 // Registered at priority 700 — after inline-population (default 100) and
 // the PDF/tabular transformers (600/610), before vaultPrefixTransformer
@@ -99,26 +163,11 @@ func (t imageSizeTransformer) maybeRewriteWikilink(n *wikilink.Node, source []by
 	if len(labelBytes) == 0 {
 		return
 	}
-	// First-pass: whole label is a size (`300` or `300x200`).
-	w, h, ok := embedSizeAttrs(labelBytes)
-	var alt []byte
-	if !ok {
-		// Second-pass: label ends with `|N` or `|NxM`. Obsidian's three-pipe
-		// case `![[a.png|caption|300]]` arrives as the single text
-		// "caption|300" because wikilink's parser only splits on the first
-		// `|`.
-		idx := bytes.LastIndexByte(labelBytes, '|')
-		if idx < 0 {
-			return
-		}
-		ww, hh, ok2 := embedSizeAttrs(labelBytes[idx+1:])
-		if !ok2 {
-			return
-		}
-		w, h, ok = ww, hh, true
-		alt = bytes.TrimSpace(labelBytes[:idx])
-	}
-	if !ok {
+	// The label is everything after the first `|` (wikilink's parser only splits
+	// once), so Obsidian's `![[a.png|caption|300|theme-dark]]` arrives as the
+	// single text "caption|300|theme-dark". One segment walk classifies it.
+	parsed := parseEmbedLabel(labelBytes)
+	if !parsed.found {
 		return
 	}
 	// Resolve via the same resolver the wikilink renderer would use.
@@ -133,13 +182,10 @@ func (t imageSizeTransformer) maybeRewriteWikilink(n *wikilink.Node, source []by
 	}
 	img := ast.NewImage(ast.NewLink())
 	img.Destination = []byte(dest)
-	if len(alt) > 0 {
-		img.AppendChild(img, ast.NewString(alt))
+	if len(parsed.alt) > 0 {
+		img.AppendChild(img, ast.NewString(parsed.alt))
 	}
-	setIntAttr(img, "width", w)
-	if h > 0 {
-		setIntAttr(img, "height", h)
-	}
+	applyEmbedAttrs(img, parsed)
 	parent := n.Parent()
 	if parent == nil {
 		return
@@ -148,33 +194,30 @@ func (t imageSizeTransformer) maybeRewriteWikilink(n *wikilink.Node, source []by
 }
 
 func (t imageSizeTransformer) maybeRewriteImage(img *ast.Image, source []byte) {
-	// Standard markdown image: `![alt|300](url)` or `![alt|300x200](url)`.
-	// Require a `|` separator — bare `![300](url)` is treated as ordinary
-	// alt text since `300` may be a legitimate description, not a size hint.
+	// Standard markdown image: `![alt|300|theme-dark](url)` etc. Require a `|`
+	// separator — bare `![300](url)` / `![theme-dark](url)` is treated as
+	// ordinary alt text since the whole alt may be a legitimate description, not
+	// a size/variant hint. (Wikilink labels already imply a `|` past the target,
+	// so that path parses single-segment labels; this one must not.)
 	first, ok := img.FirstChild().(*ast.Text)
 	if !ok {
 		return
 	}
 	altRaw := first.Segment.Value(source)
-	idx := bytes.LastIndexByte(altRaw, '|')
-	if idx < 0 {
+	if bytes.IndexByte(altRaw, '|') < 0 {
 		return
 	}
-	w, h, sok := embedSizeAttrs(altRaw[idx+1:])
-	if !sok {
+	parsed := parseEmbedLabel(altRaw)
+	if !parsed.found {
 		return
 	}
 	// Segment is read-only — drop the Text child, re-attach an *ast.String
 	// holding the trimmed alt.
 	img.RemoveChild(img, first)
-	trimmed := bytes.TrimSpace(altRaw[:idx])
-	if len(trimmed) > 0 {
-		img.AppendChild(img, ast.NewString(trimmed))
+	if len(parsed.alt) > 0 {
+		img.AppendChild(img, ast.NewString(parsed.alt))
 	}
-	setIntAttr(img, "width", w)
-	if h > 0 {
-		setIntAttr(img, "height", h)
-	}
+	applyEmbedAttrs(img, parsed)
 }
 
 func setIntAttr(n ast.Node, name string, v int) {
