@@ -12,11 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"regexp"
-
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
-	formatcfg "github.com/go-git/go-git/v5/plumbing/format/config"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/utils/merkletrie"
@@ -45,60 +42,10 @@ type GitStore struct {
 	mu   sync.Mutex
 }
 
-// gitConfigPath returns the path to .git/config for the given repo root.
-func gitConfigPath(root string) string {
-	return filepath.Join(root, ".git", "config")
-}
-
-// reOpenSHA256Repo works around a go-git v5 bug where PlainOpen rejects repos
-// with extensions.objectFormat = sha256 as an "unknown extension". We temporarily
-// remove the [extensions] section from the on-disk config, open the repo, then
-// restore the section so system git commands continue to see it.
-func reOpenSHA256Repo(root string) (*git.Repository, error) {
-	cfgPath := gitConfigPath(root)
-
-	original, err := os.ReadFile(cfgPath)
-	if err != nil {
-		return nil, fmt.Errorf("read git config: %w", err)
-	}
-
-	// Strip the [extensions] section and everything indented under it.
-	patched := reExtensionsSection.ReplaceAll(original, nil)
-	if err := os.WriteFile(cfgPath, patched, 0644); err != nil {
-		return nil, fmt.Errorf("patch git config: %w", err)
-	}
-
-	repo, openErr := git.PlainOpen(root)
-
-	// Always restore the original config, regardless of open success.
-	_ = os.WriteFile(cfgPath, original, 0644)
-
-	return repo, openErr
-}
-
-// reExtensionsSection matches the [extensions] section header and all
-// continuation lines (lines starting with whitespace or a tab).
-var reExtensionsSection = regexp.MustCompile(`(?m)^\[extensions\][^\n]*\n(?:[ \t][^\n]*\n)*`)
-
 func OpenOrInitGit(root string) (*GitStore, error) {
 	repo, openErr := git.PlainOpen(root)
 	if openErr == nil {
 		return &GitStore{root: root, repo: repo}, nil
-	}
-
-	// go-git v5.19 has two bugs with SHA-256 repos:
-	//  1. unmarshalCore doesn't read repositoryformatversion, so it's always "".
-	//  2. verifyExtensions then treats all repos as V0, rejecting unknown
-	//     extensions (including objectformat) with ErrUnsupportedExtension...
-	// Work around by temporarily stripping [extensions] from the on-disk config
-	// before calling PlainOpen again.
-	if errors.Is(openErr, git.ErrUnsupportedExtensionRepositoryFormatVersion) ||
-		errors.Is(openErr, git.ErrUnknownExtension) {
-		repo, openErr = reOpenSHA256Repo(root)
-		if openErr == nil {
-			return &GitStore{root: root, repo: repo}, nil
-		}
-		return nil, fmt.Errorf("git open sha256 %s: %w", root, openErr)
 	}
 
 	// Only initialize a new repo when the directory genuinely has no git repo.
@@ -106,15 +53,17 @@ func OpenOrInitGit(root string) (*GitStore, error) {
 		return nil, fmt.Errorf("git open %s: %w", root, openErr)
 	}
 
-	repo, err := git.PlainInitWithOptions(root, &git.PlainInitOptions{
-		ObjectFormat: formatcfg.SHA256,
-		Bare:         false,
-	})
-	if errors.Is(err, git.ErrSHA256NotSupported) {
-		// Not compiled with SHA-256 support: PlainInitWithOptions still creates
-		// the .git/ dir before returning the error, so re-open it.
-		repo, err = git.PlainOpen(root)
-	}
+	// Vaults are SHA-1 (go-git's default), deliberately NOT SHA-256. go-git v5's
+	// SHA-256 support is second-class — opening such a repo needs on-disk config
+	// patching to dodge a verifyExtensions bug — and SHA-256 repos can't push to
+	// forges (GitHub) or clone across formats, which operator backup/inspection
+	// relies on. The wire hash (protocol.Hash, 32B) carries the 20-byte commit
+	// OID zero-padded; the padding is inert *only* while every component stays
+	// SHA-1. A SHA-256-mode binary reading a SHA-1 repo pads the ref to 32B and
+	// then can't find the object — that mismatch is what produced the
+	// "object not found" handshake failure. Never build the server with
+	// -tags sha256.
+	repo, err := git.PlainInit(root, false)
 	if err != nil {
 		return nil, fmt.Errorf("git init %s: %w", root, err)
 	}
@@ -445,7 +394,25 @@ func (g *GitStore) StageFile(relPath string) error {
 func (g *GitStore) GC() error {
 	cmd := exec.Command("git", "gc")
 	cmd.Dir = g.root
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	// git gc packs loose objects into a new packfile and deletes the loose
+	// files. go-git caches its packfile list at open time and never notices an
+	// external repack, so the long-lived handle then fails EVERY object lookup
+	// with "object not found" — until the process restarts. Reopen so the
+	// storer rescans .git/objects/pack/. (Root cause of nightly-GC silently
+	// breaking sync: handshake's CommitObject(HEAD) on the stale handle.)
+	// Caller holds vs.fileMu, so no other git op races this reassignment; g.mu
+	// guards it against the GitStore's own internal readers.
+	repo, err := git.PlainOpen(g.root)
+	if err != nil {
+		return fmt.Errorf("reopen after gc: %w", err)
+	}
+	g.mu.Lock()
+	g.repo = repo
+	g.mu.Unlock()
+	return nil
 }
 
 // StatusEntry summarizes a single entry from the working-tree status.

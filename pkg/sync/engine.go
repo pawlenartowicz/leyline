@@ -294,6 +294,9 @@ func (e *Engine) recvHelloOK(ctx context.Context) (*protocol.HelloOKMsg, error) 
 	if err != nil {
 		return nil, err
 	}
+	if em, ok := msg.Payload.(*protocol.ErrorMsg); ok {
+		return nil, fmt.Errorf("server rejected sync: %s", wire.FriendlyMessage(em.Code, em.Message))
+	}
 	hok, ok := msg.Payload.(*protocol.HelloOKMsg)
 	if !ok {
 		return nil, fmt.Errorf("expected HelloOK, got %T", msg.Payload)

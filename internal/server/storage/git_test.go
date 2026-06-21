@@ -411,6 +411,39 @@ func writeAndCommit(t *testing.T, g *GitStore, relPath, author, body string) {
 	}
 }
 
+// TestGC_ReopensSoObjectsStayReadable guards the nightly-GC bug: external
+// `git gc` packs loose objects and deletes the loose files, invalidating
+// go-git's cached packfile list on the long-lived handle. Without GC()
+// reopening the repo, the next CommitObject(HEAD) fails "object not found"
+// even though the object is intact (native git reads it fine).
+func TestGC_ReopensSoObjectsStayReadable(t *testing.T) {
+	requireSystemGit(t)
+	g := newEmptyRepo(t)
+	writeAndCommit(t, g, "a.md", "alice", "one")
+	writeAndCommit(t, g, "b.md", "alice", "two")
+
+	head, err := g.HeadHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ph plumbing.Hash
+	copy(ph[:], head[:])
+
+	// Arm go-git's pack-list cache with the pre-gc state, so a stale handle
+	// would not rescan after the repack.
+	if _, err := g.repo.CommitObject(ph); err != nil {
+		t.Fatalf("HEAD unreadable before gc: %v", err)
+	}
+
+	if err := g.GC(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := g.repo.CommitObject(ph); err != nil {
+		t.Fatalf("HEAD commit unreadable after GC (stale go-git pack cache): %v", err)
+	}
+}
+
 func TestGitTag_Lightweight(t *testing.T) {
 	g := newRepoWithCommits(t, "a.md", "alice", 3)
 	head, _ := g.repo.Head()
@@ -530,12 +563,10 @@ func TestDiff_AddedModifiedDeleted(t *testing.T) {
 	}
 }
 
-// requireSystemGitSHA256 skips the test if the system git binary does not
-// support SHA-256 repos fully. go-git compiled with -tags sha256 uses
-// 32-byte SHA-256 hashes for all git objects. System git binaries compiled
-// without SHA-256 support fail when executing commands that modify or
-// read the index (revert, read-tree, etc.).
-func requireSystemGitSHA256(t *testing.T) {
+// requireSystemGit skips the test when the system git binary is unavailable or
+// can't perform a revert. Revert/Restore shell out to system git (see git.go),
+// so without it these tests would fail with cryptic errors rather than skip.
+func requireSystemGit(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
 	gs, err := OpenOrInitGit(dir)
@@ -549,10 +580,8 @@ func requireSystemGitSHA256(t *testing.T) {
 	head, _ := gs.repo.Head()
 	gs.mu.Unlock()
 
-	// Test git revert directly. If system git can't handle sha256 index or
-	// objects, this is where it fails with "unknown index entry format" or
-	// "bad revision". Doing this probe once avoids cryptic failures in the
-	// actual tests.
+	// Probe a real revert once so the actual tests skip cleanly when system
+	// git is missing or broken, instead of erroring mid-test.
 	env := append([]string{},
 		"GIT_AUTHOR_NAME=probe", "GIT_AUTHOR_EMAIL=probe@probe",
 		"GIT_COMMITTER_NAME=probe", "GIT_COMMITTER_EMAIL=probe@probe",
@@ -563,12 +592,12 @@ func requireSystemGitSHA256(t *testing.T) {
 	cmd.Env = env
 	out, runErr := cmd.CombinedOutput()
 	if runErr != nil {
-		t.Skipf("system git does not support SHA-256 repos (git revert probe failed: %q); skipping test", string(out))
+		t.Skipf("system git unavailable or broken (git revert probe failed: %q); skipping test", string(out))
 	}
 }
 
 func TestRevert_CleanCommit(t *testing.T) {
-	requireSystemGitSHA256(t)
+	requireSystemGit(t)
 	g := newEmptyRepo(t)
 	writeAndCommit(t, g, "a.md", "alice", "one")
 	writeAndCommit(t, g, "b.md", "alice", "two")
@@ -591,7 +620,7 @@ func TestRevert_CleanCommit(t *testing.T) {
 }
 
 func TestRestore_ToOlderTree(t *testing.T) {
-	requireSystemGitSHA256(t)
+	requireSystemGit(t)
 	g := newEmptyRepo(t)
 	writeAndCommit(t, g, "a.md", "alice", "a")
 	target, _ := g.repo.Head()
