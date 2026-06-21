@@ -40,6 +40,9 @@ type VaultYAML struct {
 	// TocFollow overrides the theme's right-rail ToC scroll motion for this
 	// vault. "" = inherit theme; accepted: drift | pin.
 	TocFollow string `yaml:"toc_follow"`
+	// TextAlign overrides the theme's prose alignment for this vault.
+	// "" = inherit theme; accepted: justify | left.
+	TextAlign string `yaml:"text_align"`
 	// Custom is the vault-level overlay for the free-form theme-author
 	// space. Merged per-key onto the chain-merged theme custom map by
 	// Collapse — a key set here wins; unset keys inherit. Nested maps
@@ -133,6 +136,11 @@ func LoadVaultYAML(vaultDir string) (VaultYAML, error) {
 	default:
 		return VaultYAML{}, fmt.Errorf("vault web.yaml at %s: invalid toc_follow %q (want: drift | pin)", p, v.TocFollow)
 	}
+	switch v.TextAlign {
+	case "", "justify", "left":
+	default:
+		return VaultYAML{}, fmt.Errorf("vault web.yaml at %s: invalid text_align %q (want: justify | left)", p, v.TextAlign)
+	}
 	if err := validateVersions(v.Versions, p); err != nil {
 		return VaultYAML{}, err
 	}
@@ -176,6 +184,11 @@ func Collapse(m Manifest, vault VaultYAML) Resolved {
 		tocFollow = vault.TocFollow
 	}
 
+	textAlign := m.Defaults.TextAlign
+	if vault.TextAlign != "" {
+		textAlign = vault.TextAlign
+	}
+
 	return Resolved{
 		ShowTitles: derefBool(m.ShowTitles, true),
 		GuestRole:  resolvedGuestRole,
@@ -194,6 +207,7 @@ func Collapse(m Manifest, vault VaultYAML) Resolved {
 		LeftSidebar:  resolveSidebar(m.Defaults.LeftSidebar, vault.LeftSidebar),
 		RightSidebar: resolveSidebar(m.Defaults.RightSidebar, vault.RightSidebar),
 		TocFollow:    orString(tocFollow, "drift"),
+		TextAlign:    orString(textAlign, "justify"),
 		Custom:       MergeCustom(m.Custom, vault.Custom),
 	}
 }

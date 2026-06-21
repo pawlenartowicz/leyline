@@ -68,6 +68,11 @@ type Defaults struct {
 	// (that mode floats margin notes, not a ToC rail). Consumed by the base
 	// theme's body[data-toc-follow="…"] CSS + the rail-drift JS.
 	TocFollow string `yaml:"toc_follow"` // "" | drift | pin
+	// TextAlign picks the horizontal alignment of article prose (paragraphs +
+	// list items only; headings/code/tables stay left). "justify" (default)
+	// justifies with hyphenation; "left" is ragged-right. "" = inherit/unset.
+	// Consumed by the base theme's body[data-text-align="…"] CSS.
+	TextAlign string `yaml:"text_align"` // "" | justify | left
 }
 
 // AuthDefaults is the raw, parse-time auth config inside a theme's `defaults:`
@@ -118,6 +123,9 @@ type Resolved struct {
 	// TocFollow is the resolved right-rail ToC scroll motion: "drift" | "pin".
 	// Never empty after Collapse — "drift" is the bottom default.
 	TocFollow string
+	// TextAlign is the resolved prose alignment: "justify" | "left".
+	// Never empty after Collapse — "justify" is the bottom default.
+	TextAlign string
 	GuestRole string
 	EditSwitch   ResolvedEditSwitch
 	Auth         ResolvedAuth
@@ -241,6 +249,11 @@ func LoadManifest(path string) (*Manifest, error) {
 	case "", "drift", "pin":
 	default:
 		return nil, fmt.Errorf("manifest %s: invalid toc_follow %q (want: drift | pin)", path, m.Defaults.TocFollow)
+	}
+	switch m.Defaults.TextAlign {
+	case "", "justify", "left":
+	default:
+		return nil, fmt.Errorf("manifest %s: invalid text_align %q (want: justify | left)", path, m.Defaults.TextAlign)
 	}
 	if err := validateVersions(m.Versions, path); err != nil {
 		return nil, err

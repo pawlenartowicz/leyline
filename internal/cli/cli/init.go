@@ -120,7 +120,20 @@ func RunInit(o InitOpts) error {
 	hostname, _ := os.Hostname()
 	keyName := promptDefault(o.Out, br, "Key name", hostname)
 
-	// Test connection BEFORE writing files — fail fast. For --from-local
+	// client_id must exist before the connection test: the server rejects any
+	// Auth without one. Created here (after --reset wiped the backend dir, top
+	// of RunInit) so the pre-flight Dial and every later sync share one stable
+	// per-installation UUID. EnsureClientID is idempotent, so a failed init
+	// that bails below leaves only this harmless local-only file to reuse.
+	if err := os.MkdirAll(daemon.BackendDir(o.VaultRoot), 0o700); err != nil {
+		return fmt.Errorf("mkdir backend: %w", err)
+	}
+	clientID, err := stage.EnsureClientID(daemon.ClientIDFile(o.VaultRoot))
+	if err != nil {
+		return fmt.Errorf("client_id: %w", err)
+	}
+
+	// Test connection BEFORE writing config files — fail fast. For --from-local
 	// the AuthOK reply's Caps determine whether the session holds
 	// vault.admin; we capture it here and verify before the destructive
 	// side-effects below.
@@ -131,6 +144,7 @@ func RunInit(o InitOpts) error {
 		URL:           vault,
 		Key:           key,
 		PluginVersion: buildinfo.Value,
+		ClientID:      clientID,
 		Dialer:        o.Dialer,
 	})
 	if err != nil {
@@ -173,13 +187,6 @@ func RunInit(o InitOpts) error {
 		if err := os.WriteFile(ignorePath, []byte(DefaultLeylineignore), 0o600); err != nil {
 			return fmt.Errorf("write leylineignore: %w", err)
 		}
-	}
-
-	if err := os.MkdirAll(daemon.BackendDir(o.VaultRoot), 0o700); err != nil {
-		return fmt.Errorf("mkdir backend: %w", err)
-	}
-	if _, err := stage.EnsureClientID(daemon.ClientIDFile(o.VaultRoot)); err != nil {
-		return fmt.Errorf("client_id: %w", err)
 	}
 
 	if err := daemon.Register(o.VaultRoot); err != nil {
