@@ -177,6 +177,7 @@ func runUpdate(_ []string, opts runOpts) int {
 	}
 
 	exitCode := 0
+	var downloaded []string // .deb/.rpm paths to install in one command
 	for _, c := range componentsForUpdate() {
 		installedVer, ok := c.installed(lookPath)
 		if !ok {
@@ -211,8 +212,14 @@ func runUpdate(_ []string, opts runOpts) int {
 		}
 		fmt.Fprintf(opts.Stdout, "%-15s %s → %s   downloaded %s\n",
 			c.label, installedVer, latest, dst)
-		fmt.Fprintf(opts.Stdout, "%-15s                  run: sudo %s %s %s\n",
-			"", pm.bin, pm.installCmd, dst)
+		downloaded = append(downloaded, dst)
+	}
+
+	// One combined install command so a user can't update only some packages
+	// and end up running mismatched component versions against each other.
+	if len(downloaded) > 0 {
+		fmt.Fprintf(opts.Stdout, "\nrun:\nsudo %s %s %s\n",
+			pm.bin, pm.installCmd, strings.Join(downloaded, " "))
 	}
 	return exitCode
 }
