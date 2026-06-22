@@ -110,6 +110,7 @@ func collectConstants() constantTables {
 		PushAckResults: []stringEntry{
 			{"OK", protocol.PushAckOK},
 			{"STALE_BASE", protocol.PushAckStaleBase},
+			{"FILTERED", protocol.PushAckFiltered},
 		},
 		OpTypes: []stringEntry{
 			{"WRITE", protocol.OpWrite},
@@ -154,7 +155,7 @@ func collectConstants() constantTables {
 			HelloMsg:    map[string]uint8{"type": 0, "base": 1, "manifest_digest": 2},
 			HelloOKMsg:  map[string]uint8{"type": 0, "state": 1, "head": 2},
 			PushBatch:   map[string]uint8{"type": 0, "batch_id": 1, "base": 2, "ops": 3},
-			PushAck:     map[string]uint8{"type": 0, "batch_id": 1, "result": 2, "new_base": 3},
+			PushAck:     map[string]uint8{"type": 0, "batch_id": 1, "result": 2, "new_base": 3, "filtered": 4},
 			Catchup:     map[string]uint8{"type": 0, "from": 1, "to": 2, "ops": 3, "more": 4},
 			Bootstrap:   map[string]uint8{"type": 0, "head": 1, "ops": 2, "more": 3},
 			Broadcast:   map[string]uint8{"type": 0, "from": 1, "to": 2, "ops": 3},

@@ -57,6 +57,12 @@ const (
 const (
 	PushAckOK        = "ok"
 	PushAckStaleBase = "stale_base"
+	// PushAckFiltered: the server refused one or more ops under the [sync]
+	// allowlist gate (type or size). The refused paths ride in
+	// PushAckMsg.Filtered; nothing committed and HEAD is unchanged. The
+	// client drops those ops and retries the clean remainder — a recoverable
+	// policy filter, not an error (see docs/plans 2026-06-22 reject-driven).
+	PushAckFiltered = "filtered"
 )
 
 // OpType values for Op.Type. The wire carries these as short strings (CBOR

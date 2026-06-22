@@ -414,10 +414,11 @@ func TestHandlePushBatch_DuplicateSeqs_Dropped(t *testing.T) {
 }
 
 // TestHandlePushBatch_RejectsBadOps verifies receipt-time validation: paths
-// that fail pathutil.ValidatePath, files whose extension is not in
-// [sync], and oversize payloads all draw an immediate MsgError and never
-// reach the stage. The check at the handler boundary keeps the WAL from
-// being poisoned with ops that would only fail at commit time.
+// that fail pathutil.ValidatePath draw an immediate MsgError and never reach
+// the stage. The check at the handler boundary keeps the WAL from being
+// poisoned with ops that would only fail at commit time. The [sync]-gate
+// rejections (disallowed extension, oversize) are NOT errors — they ack
+// PushAckFiltered; see TestHandlePushBatch_FilteredSyncGate.
 func TestHandlePushBatch_RejectsBadOps(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -449,23 +450,6 @@ func TestHandlePushBatch_RejectsBadOps(t *testing.T) {
 			wantErr: protocol.ErrInvalidPath,
 		},
 		{
-			name: "disallowed_extension",
-			op: protocol.Op{
-				Seq: 1, Type: protocol.OpWrite, Path: "bad.exe",
-				Data: []byte("x"), TS: time.Now().UnixNano(),
-			},
-			wantErr: protocol.ErrTypeNotAllowed,
-		},
-		{
-			name: "oversize",
-			op: protocol.Op{
-				Seq: 1, Type: protocol.OpWrite, Path: "big.md",
-				Data: make([]byte, 11*1024*1024), // limit is 10mb in test fixture
-				TS:   time.Now().UnixNano(),
-			},
-			wantErr: protocol.ErrFileTooLarge,
-		},
-		{
 			name: "rename_target_traversal",
 			op: protocol.Op{
 				Seq: 1, Type: protocol.OpRename, From: "a.md", To: "../escape.md",
@@ -492,6 +476,101 @@ func TestHandlePushBatch_RejectsBadOps(t *testing.T) {
 				t.Fatalf("stage absorbed rejected op; opCount=%d", st.OpCount())
 			}
 		})
+	}
+}
+
+// TestHandlePushBatch_FilteredSyncGate verifies a batch mixing allowed and
+// [sync]-gate-rejected ops (disallowed type + oversize) draws a single
+// PushAckFiltered listing exactly the disallowed paths, commits nothing (the
+// allowed op included — the batch is atomic), and never reaches the stage.
+func TestHandlePushBatch_FilteredSyncGate(t *testing.T) {
+	hr := newHarness(t, "push-filtered", nil)
+
+	allowed := protocol.Op{
+		Seq: 1, Type: protocol.OpWrite, Path: "notes/keep.md",
+		Data: []byte("ok"), TS: time.Now().UnixNano(),
+	}
+	badType := protocol.Op{
+		Seq: 2, Type: protocol.OpWrite, Path: "bad.exe",
+		Data: []byte("x"), TS: time.Now().UnixNano(),
+	}
+	tooBig := protocol.Op{
+		Seq: 3, Type: protocol.OpWrite, Path: "big.md",
+		Data: make([]byte, 11*1024*1024), // limit is 10mb in test fixture
+		TS:   time.Now().UnixNano(),
+	}
+	sendMsg(t, hr.conn, protocol.PushBatchMsg{
+		Type: protocol.MsgPushBatch, BatchID: 1,
+		Base: hr.head, Ops: []protocol.Op{allowed, badType, tooBig},
+	})
+
+	raw := expectType(t, hr.conn, protocol.MsgPushAck)
+	var ack protocol.PushAckMsg
+	decodeAs(t, raw, &ack)
+	if ack.Result != protocol.PushAckFiltered {
+		t.Fatalf("Result = %q, want filtered", ack.Result)
+	}
+	want := map[string]bool{"bad.exe": true, "big.md": true}
+	if len(ack.Filtered) != len(want) {
+		t.Fatalf("Filtered = %v, want exactly %v", ack.Filtered, want)
+	}
+	for _, p := range ack.Filtered {
+		if !want[p] {
+			t.Errorf("unexpected filtered path %q (want %v)", p, want)
+		}
+	}
+	// Atomic batch: nothing committed/staged — not even the allowed op.
+	if st := hr.vs.getStage(hr.cid); st != nil && st.OpCount() != 0 {
+		t.Fatalf("stage absorbed ops on filtered batch; opCount=%d", st.OpCount())
+	}
+}
+
+// TestHandlePushBatch_FilteredDoesNotTripBreaker verifies a [sync]-gate filter
+// is not counted as a failed push: repeated filtered batches must not advance
+// the circuit breaker, so a subsequent well-formed op still acks OK rather than
+// rate_limited.
+func TestHandlePushBatch_FilteredDoesNotTripBreaker(t *testing.T) {
+	const limit = 3
+	h, server, key := testHarnessWithConfig(t, func(c *config.Config) {
+		c.Sync.FailedPushRateLimit = limit
+	})
+	vs := h.GetVaultState("a")
+	conn := connectClientWithID(t, server, key, "rl-filtered")
+	sendMsg(t, conn, protocol.HelloMsg{Type: protocol.MsgHello, Base: nil})
+	expectType(t, conn, protocol.MsgHelloOK)
+	expectType(t, conn, protocol.MsgBootstrap)
+
+	// More filtered batches than the breaker limit — none should count.
+	for i := 0; i < limit+2; i++ {
+		bad := protocol.Op{
+			Seq: uint64(i + 1), Type: protocol.OpWrite, Path: "bad.exe",
+			Data: []byte("x"), TS: time.Now().UnixNano(),
+		}
+		sendMsg(t, conn, protocol.PushBatchMsg{
+			Type: protocol.MsgPushBatch, BatchID: uint64(i + 1),
+			Base: vs.headHashCached, Ops: []protocol.Op{bad},
+		})
+		raw := expectType(t, conn, protocol.MsgPushAck)
+		var ack protocol.PushAckMsg
+		decodeAs(t, raw, &ack)
+		if ack.Result != protocol.PushAckFiltered {
+			t.Fatalf("iter %d: Result = %q, want filtered", i, ack.Result)
+		}
+	}
+
+	good := protocol.Op{
+		Seq: 100, Type: protocol.OpWrite, Path: "ok.md",
+		Data: []byte("ok"), TS: time.Now().UnixNano(),
+	}
+	sendMsg(t, conn, protocol.PushBatchMsg{
+		Type: protocol.MsgPushBatch, BatchID: 100,
+		Base: vs.headHashCached, Ops: []protocol.Op{good},
+	})
+	raw := expectType(t, conn, protocol.MsgPushAck)
+	var ack protocol.PushAckMsg
+	decodeAs(t, raw, &ack)
+	if ack.Result != protocol.PushAckOK {
+		t.Fatalf("after %d filtered batches expected ok (breaker untouched), got %q", limit+2, ack.Result)
 	}
 }
 

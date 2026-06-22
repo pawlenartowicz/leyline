@@ -207,8 +207,13 @@ func (h *Hub) handlePushBatch(c *Client, vs *VaultState, msg *protocol.PushBatch
 
 	// Per-op validation. Done at receipt — never let a non-conformant
 	// client poison the WAL with ops that will fail at commit time, and
-	// never ack OK to something we'd reject on disk. Any rejection here
-	// counts toward the failed-push circuit breaker.
+	// never ack OK to something we'd reject on disk. Structural/permission
+	// rejections here count toward the failed-push circuit breaker and
+	// fail-fast; the [sync] allowlist gate is different — it is a recoverable
+	// policy filter (the client drops and retries), so its rejections are
+	// collected into `filtered` and acked with PushAckFiltered, no Record,
+	// no commit (see docs/plans 2026-06-22 reject-driven-filter-design).
+	var filtered []string
 	for _, op := range ops {
 		if err := protocol.ValidateOp(op); err != nil {
 			c.failedPushLimiter.Record()
@@ -262,15 +267,16 @@ func (h *Hub) handlePushBatch(c *Client, vs *VaultState, msg *protocol.PushBatch
 				}
 				break
 			}
-			if ok, reason := vs.rules.CanSync(op.Path, 0); !ok {
-				c.failedPushLimiter.Record()
-				c.sendError(protocol.ErrTypeNotAllowed, reason, op.Path)
-				return
+			// [sync] gate (type then size): a policy filter, not abuse —
+			// collect and keep walking so one batch reports every refused
+			// path in a single PushAckFiltered.
+			if ok, _ := vs.rules.CanSync(op.Path, 0); !ok {
+				filtered = append(filtered, op.Path)
+				continue
 			}
-			if ok, reason := vs.rules.CanSync(op.Path, int64(len(op.Data))); !ok {
-				c.failedPushLimiter.Record()
-				c.sendError(protocol.ErrFileTooLarge, reason, op.Path)
-				return
+			if ok, _ := vs.rules.CanSync(op.Path, int64(len(op.Data))); !ok {
+				filtered = append(filtered, op.Path)
+				continue
 			}
 		case protocol.OpRename:
 			// A rename touching the vaultconfig tree at either endpoint
@@ -286,10 +292,11 @@ func (h *Hub) handlePushBatch(c *Client, vs *VaultState, msg *protocol.PushBatch
 			if pathutil.IsSyncableControlPlanePath(op.To) {
 				break // control-plane target bypasses the extension whitelist
 			}
-			if ok, reason := vs.rules.CanSync(op.To, 0); !ok {
-				c.failedPushLimiter.Record()
-				c.sendError(protocol.ErrTypeNotAllowed, "rename target "+reason, op.To)
-				return
+			// [sync] gate on the rename target — same recoverable-filter
+			// treatment as OpWrite above (server reports op.To).
+			if ok, _ := vs.rules.CanSync(op.To, 0); !ok {
+				filtered = append(filtered, op.To)
+				continue
 			}
 		case protocol.OpDelete:
 			// Deleting an admin-only control-plane file requires vault.admin;
@@ -300,6 +307,23 @@ func (h *Hub) handlePushBatch(c *Client, vs *VaultState, msg *protocol.PushBatch
 				return
 			}
 		}
+	}
+
+	// [sync]-gate filter result. Reported before the vault-size / overlap
+	// checks so a disallowed-type op surfaces as recoverable (filtered)
+	// rather than being masked by an unrelated stale_base. The whole batch
+	// commits nothing — the client drops the named ops and retries the clean
+	// remainder. Not Record()ed: a policy filter is not abuse, and the client
+	// self-corrects. NewBase is advisory only (HEAD unchanged).
+	if len(filtered) > 0 {
+		c.SendMsg(protocol.PushAckMsg{
+			Type:     protocol.MsgPushAck,
+			BatchID:  msg.BatchID,
+			Result:   protocol.PushAckFiltered,
+			NewBase:  vs.headHashCached,
+			Filtered: filtered,
+		})
+		return
 	}
 
 	// Vault size caps (vault_limits). Checked after per-op validation so

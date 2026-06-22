@@ -549,6 +549,107 @@ func TestEngineSeamlessRetryAfterCrossClientOverlap(t *testing.T) {
 	}
 }
 
+// TestEnginePushAckFiltered_DropsNamedOpsAndRetriesRemainder verifies the
+// reject-driven self-heal: a PushAckFiltered naming one staged op drops exactly
+// that op from the staged log (HEAD unchanged → no re-Hello), then the clean
+// remainder re-pushes and commits. Ops not named survive into the retry batch.
+func TestEnginePushAckFiltered_DropsNamedOpsAndRetriesRemainder(t *testing.T) {
+	head1 := hashOf("HEAD-1")
+	head2 := hashOf("HEAD-2") // after the clean remainder commits
+
+	var helloCount int
+	var pushBatches []protocol.PushBatchMsg
+	f := newEngineFixture(t, func(c *websocket.Conn) {
+		recvAuth(c)
+		sendAuthOK(t, c)
+
+		mt, _ := recvFrame(t, c)
+		if mt == protocol.MsgHello {
+			helloCount++
+		}
+		sendCBOR(t, c, protocol.HelloOKMsg{
+			Type: protocol.MsgHelloOK, State: protocol.HelloStateUpToDate, Head: head1,
+		})
+
+		// 1. First PushBatch carries both ops (keep.md + bad.exe).
+		_, msg := recvFrame(t, c)
+		pb := msg.(*protocol.PushBatchMsg)
+		pushBatches = append(pushBatches, *pb)
+		// Refuse bad.exe under the [sync] gate. NewBase is advisory; HEAD
+		// stays head1 (nothing committed).
+		sendCBOR(t, c, protocol.PushAckMsg{
+			Type: protocol.MsgPushAck, BatchID: pb.BatchID,
+			Result: protocol.PushAckFiltered, NewBase: head1,
+			Filtered: []string{"bad.exe"},
+		})
+
+		// 2. Engine drops bad.exe and re-pushes the remainder — NO re-Hello.
+		mt, msg = recvFrame(t, c)
+		if mt == protocol.MsgHello {
+			helloCount++
+			t.Errorf("filtered retry MUST NOT re-Hello; saw a second Hello")
+			return
+		}
+		pb2 := msg.(*protocol.PushBatchMsg)
+		pushBatches = append(pushBatches, *pb2)
+		sendCBOR(t, c, protocol.PushAckMsg{
+			Type: protocol.MsgPushAck, BatchID: pb2.BatchID,
+			Result: protocol.PushAckOK, NewBase: head2,
+		})
+
+		// 3. ModeSync ends with Flush.
+		_, msg = recvFrame(t, c)
+		if fm, ok := msg.(*protocol.FlushMsg); ok {
+			sendCBOR(t, c, protocol.FlushAckMsg{
+				Type: protocol.MsgFlushAck, FlushID: fm.FlushID, Head: head2,
+			})
+		}
+	})
+	defer f.close()
+
+	prev := head1
+	f.base.Base = &prev
+	_ = stage.WriteBase(f.basePath, *f.base)
+	_ = f.staged.Append(stage.StagedOp{Op: protocol.Op{
+		Seq: 1, Type: protocol.OpWrite, Path: "keep.md", Data: []byte("keep"), TS: 1, Author: f.keyname,
+	}})
+	_ = f.staged.Append(stage.StagedOp{Op: protocol.Op{
+		Seq: 2, Type: protocol.OpWrite, Path: "bad.exe", Data: []byte("x"), TS: 2, Author: f.keyname,
+	}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := f.newEngine(ModeSync).RunSession(ctx); err != nil {
+		t.Fatalf("RunSession: %v", err)
+	}
+
+	if helloCount != 1 {
+		t.Errorf("Hello count = %d, want 1 (filtered retry must skip Hello)", helloCount)
+	}
+	if len(pushBatches) != 2 {
+		t.Fatalf("PushBatch count = %d, want 2 (initial + filtered retry)", len(pushBatches))
+	}
+	if len(pushBatches[0].Ops) != 2 {
+		t.Errorf("first batch = %d ops, want 2 (keep.md + bad.exe)", len(pushBatches[0].Ops))
+	}
+	// The retry carries only the surviving op.
+	if len(pushBatches[1].Ops) != 1 || pushBatches[1].Ops[0].Path != "keep.md" {
+		t.Errorf("retry batch = %+v, want exactly keep.md", pushBatches[1].Ops)
+	}
+	// Staged log empty: bad.exe dropped, keep.md committed-and-trimmed.
+	if got := f.staged.Snapshot(); len(got) != 0 {
+		t.Errorf("staged log = %d ops, want 0 (bad.exe dropped, keep.md committed)", len(got))
+	}
+	// Only the surviving op reaches T2 (acked).
+	a := f.acked.Snapshot()
+	if len(a) != 1 || a[0].Op.Path != "keep.md" {
+		t.Errorf("acked = %+v, want exactly keep.md", a)
+	}
+	if f.base.Base == nil || *f.base.Base != head2 {
+		t.Errorf("Base = %v, want %v", f.base.Base, head2)
+	}
+}
+
 // TestEnginePushAckOKWithBufferedBroadcastApplies verifies the silent-drop
 // guard: a Broadcast that lands during a successful PushAck window must
 // still be applied to BaseStore. Without applyPendingBroadcasts the

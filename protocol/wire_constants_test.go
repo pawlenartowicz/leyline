@@ -63,7 +63,7 @@ func TestWireConstantsJSONInSync(t *testing.T) {
 		"BOOTSTRAP": HelloStateBootstrap, "BASE_LOST": HelloStateBaseLost,
 	})
 	mustMatch(t, "PushAckResults", got.PushAckResults, map[string]string{
-		"OK": PushAckOK, "STALE_BASE": PushAckStaleBase,
+		"OK": PushAckOK, "STALE_BASE": PushAckStaleBase, "FILTERED": PushAckFiltered,
 	})
 	mustMatch(t, "OpTypes", got.OpTypes, map[string]string{
 		"WRITE": OpWrite, "DELETE": OpDelete, "RENAME": OpRename,

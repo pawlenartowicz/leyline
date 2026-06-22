@@ -909,6 +909,19 @@ func (e *Engine) pushIfNeeded(ctx context.Context) error {
 		if err := e.applyPendingBroadcasts(pending); err != nil {
 			return err
 		}
+		if ack.Result == protocol.PushAckFiltered {
+			// Server refused some ops under the [sync] gate. Drop them and
+			// loop: HEAD is unchanged so the base stays valid and the next
+			// collectPushOps returns the clean remainder. Never commitPushAck.
+			n, err := e.handleFiltered(ops, ack.Filtered)
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return fmt.Errorf("server filtered %v but no matching staged op found", ack.Filtered)
+			}
+			continue
+		}
 		if ack.Result == protocol.PushAckStaleBase {
 			// Stale-base retry re-collects a now-bounded prefix and commits
 			// one chunk; loop to drain any remainder.
@@ -989,6 +1002,20 @@ func (e *Engine) seamlessRetry(ctx context.Context) error {
 		}
 		if err := e.applyPendingBroadcasts(pending); err != nil {
 			return err
+		}
+		if ack.Result == protocol.PushAckFiltered {
+			// A disallowed file staged into this overlap-retry window. Drop
+			// it and retry the clean remainder. A policy filter is not an
+			// overlap retry — don't spend the bounded budget on it.
+			n, err := e.handleFiltered(ops, ack.Filtered)
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return fmt.Errorf("server filtered %v but no matching staged op found", ack.Filtered)
+			}
+			i--
+			continue
 		}
 		if ack.Result == protocol.PushAckOK {
 			return e.commitPushAck(ops, ack.NewBase, batchID)
@@ -1214,6 +1241,61 @@ func (e *Engine) commitPushAck(ops []protocol.Op, newBase protocol.Hash, batchID
 	return nil
 }
 
+// handleFiltered processes a PushAckFiltered ack: it drops, from the staged
+// log, the just-sent ops the server refused under the [sync] allowlist gate,
+// logs a one-line notice, and returns how many ops it dropped. A filtered ack
+// never advances HEAD and is not an error — the caller drops these ops and
+// retries the clean remainder.
+//
+// Ops are matched by the Seq of the sent ops whose server-reported path is in
+// filtered — never by path-membership across the whole log: staged.jsonl is
+// append-only with no same-path coalescing, so a later ungated op on the same
+// path (e.g. a delete, which the [sync] gate never filters) must survive.
+// Renames report op.To server-side, so opTargetPath is the right key for all
+// op types here.
+//
+// The returned count lets callers refuse to loop on a filtered ack that
+// dropped nothing: the server only ever filters ops it received, so an
+// unmatchable Filtered path means protocol drift, and re-pushing the identical
+// batch would spin forever.
+func (e *Engine) handleFiltered(sent []protocol.Op, filtered []string) (int, error) {
+	if len(filtered) == 0 {
+		return 0, nil
+	}
+	refused := make(map[string]struct{}, len(filtered))
+	for _, p := range filtered {
+		refused[p] = struct{}{}
+	}
+	dropSeqs := make(map[uint64]struct{})
+	var droppedPaths []string
+	for _, op := range sent {
+		path := opTargetPath(op)
+		if _, ok := refused[path]; ok {
+			dropSeqs[op.Seq] = struct{}{}
+			droppedPaths = append(droppedPaths, path)
+		}
+	}
+	if len(dropSeqs) == 0 {
+		return 0, nil
+	}
+	staged := e.opts.Staged.Snapshot()
+	keep := make([]stage.StagedOp, 0, len(staged))
+	for _, s := range staged {
+		if _, drop := dropSeqs[s.Op.Seq]; drop {
+			continue
+		}
+		keep = append(keep, s)
+	}
+	if err := e.opts.Staged.Replace(keep); err != nil {
+		return 0, err
+	}
+	// Not silent — a vanished file is its own bug class. The reason class is
+	// fixed (server [sync] policy); the server does not ship per-path reasons.
+	slog.Warn("skipped files not allowed by server policy",
+		"count", len(droppedPaths), "paths", droppedPaths)
+	return len(droppedPaths), nil
+}
+
 // reconcileT2AfterHello implements the per-entry T2 re-classification
 // rule. After the post-catchup base settles, for each T2 entry:
 //   - if manifest[path].Hash == T2's intended post-content hash, drop
@@ -1383,6 +1465,23 @@ func (e *Engine) staleBaseRetry(ctx context.Context, newBase protocol.Hash) erro
 			// re-deriving via collectPushOps here could trim the wrong set
 			// (mirrors seamlessRetry's capture-before-send).
 			return e.commitPushAck(sent, ack.NewBase, e.opts.Base.NextBatchID-1)
+		}
+		if ack.Result == protocol.PushAckFiltered {
+			// A disallowed file staged into the retry window. Drop it and
+			// re-push the clean remainder directly: filtered never advances
+			// HEAD, so the staged log still anchors to the base we pushed
+			// against — no Hello, no re-merge. A policy filter is not a
+			// stale_base retry, so don't spend the bounded budget on it.
+			n, err := e.handleFiltered(sent, ack.Filtered)
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return fmt.Errorf("server filtered %v but no matching staged op found", ack.Filtered)
+			}
+			skipHello = true
+			i--
+			continue
 		}
 		if appliedBroadcast {
 			// A peer-commit broadcast landed during the push wait and already

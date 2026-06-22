@@ -163,14 +163,19 @@ type BootstrapMsg struct {
 	More bool `cbor:"3,keyasint,omitempty"`
 }
 
-// PushAckMsg acknowledges a PushBatch. Result is PushAckOK / PushAckStaleBase.
-// NewBase is the server's HEAD after applying (on ok) or the current HEAD
-// the client should rebase against (on stale_base).
+// PushAckMsg acknowledges a PushBatch. Result is PushAckOK / PushAckStaleBase /
+// PushAckFiltered. NewBase is the server's HEAD after applying (on ok) or the
+// current HEAD the client should rebase against (on stale_base). On filtered,
+// NewBase is advisory only: HEAD is unchanged (nothing committed), so the
+// client must NOT rebase on it — it drops the Filtered paths and retries.
 type PushAckMsg struct {
 	Type    MsgType `cbor:"0,keyasint"`
 	BatchID uint64  `cbor:"1,keyasint"`
 	Result  string  `cbor:"2,keyasint"`
 	NewBase Hash    `cbor:"3,keyasint"`
+	// Filtered carries the paths the server refused under the [sync] gate.
+	// Present only when Result == PushAckFiltered (renames report op.To).
+	Filtered []string `cbor:"4,keyasint,omitempty"`
 }
 
 // BroadcastMsg is the live-update analogue of CatchupMsg — sent when
