@@ -301,11 +301,20 @@ func (r *VaultWikilinkResolver) AssetRelPath(target string) (string, bool) {
 // preserves the extension so the wikilink renderer's image-extension check
 // sees the right suffix.
 func (r *VaultWikilinkResolver) assetURL(rel string) string {
+	return AssetURL(r.prefix, rel)
+}
+
+// AssetURL builds the public URL for a vault-relative asset path under the
+// given mount prefix: each slash-delimited segment percent-encoded, the prefix
+// prepended. Shared by the wikilink resolver (image embeds) and the SEO layer
+// (og:image) so a configured card resolves to the same URL an embed of the
+// same file would.
+func AssetURL(prefix, rel string) string {
 	escaped := escapeSegments(rel)
-	if r.prefix == "/" || r.prefix == "" {
+	if prefix == "/" || prefix == "" {
 		return "/" + escaped
 	}
-	return r.prefix + "/" + escaped
+	return prefix + "/" + escaped
 }
 
 func (r *VaultWikilinkResolver) warnIfShadowed(target, picked string) {

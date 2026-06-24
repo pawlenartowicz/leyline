@@ -2,7 +2,7 @@
 # seven repos (integration/Frog/demo/multi-repo deploy); those targets are dropped
 # — integration-tests is a deferred separate repo, and web/obsidian are siblings now.
 
-VERSION ?= 0.1.0
+VERSION ?= 0.4.0
 LDFLAGS := -s -w -X github.com/pawlenartowicz/leyline/internal/buildinfo.Value=$(VERSION)
 
 .PHONY: build test vet snapshot install

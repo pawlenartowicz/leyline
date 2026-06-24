@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/pawlenartowicz/leyline/protocol/layout"
@@ -51,6 +52,18 @@ type VaultYAML struct {
 	// Search configures the full-text search index for this vault.
 	// Opt-in per vault (enabled: false by default). See SearchYAML.
 	Search SearchYAML `yaml:"search"`
+	// OGImage is the per-vault OpenGraph card (og:image) for rich link
+	// previews: an absolute URL (http://, https://, //) emitted verbatim, or
+	// a vault-relative asset path resolved like an image embed. "" → fall
+	// through to the active theme's bundled default card. OGImageAlt is its
+	// alt text; "" → the page title. OGImageWidth/OGImageHeight override the
+	// 1200×630 card convention for a configured card of non-standard size;
+	// 0 → the default. Only consumed when the instance has a public domain
+	// (BaseURL set), same gate as the rest of the SEO head.
+	OGImage       string `yaml:"og_image"`
+	OGImageAlt    string `yaml:"og_image_alt"`
+	OGImageWidth  int    `yaml:"og_image_width"`
+	OGImageHeight int    `yaml:"og_image_height"`
 }
 
 // SearchYAML is the search: block in web.yaml. All fields are optional;

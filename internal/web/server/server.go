@@ -253,6 +253,19 @@ func (s *Server) buildVaultDeps(themes *theme.Registry, idMap map[string]string,
 		return nil, fmt.Errorf("tabular css chain: %w", err)
 	}
 
+	// Default OpenGraph card: the highest-priority theme-chain layer shipping
+	// static/og-card.png. ChainAssets returns layers parent-first (child/vault
+	// overrides last), so the winner is the last element; "" when no layer
+	// ships one (e.g. a fork that dropped the card to opt out).
+	ogCardChain, err := themes.ChainAssets(activeName, v.Root, "static/og-card.png")
+	if err != nil {
+		return nil, fmt.Errorf("og card chain: %w", err)
+	}
+	ogCardLayer := ""
+	if len(ogCardChain) > 0 {
+		ogCardLayer = ogCardChain[len(ogCardChain)-1]
+	}
+
 	wikilinks, err := render.BuildBasenameIndex(v.Root, matcher)
 	if err != nil {
 		return nil, fmt.Errorf("wikilink index: %w", err)
@@ -301,22 +314,22 @@ func (s *Server) buildVaultDeps(themes *theme.Registry, idMap map[string]string,
 	}
 
 	return &PageDeps{
-		Vault:          v,
-		Matcher:        matcher,
-		Dispatch:       s.extDispatch,
-		Themes:         themes,
-		ActiveName:     activeName,
-		Defaults:       resolved,
+		Vault:               v,
+		Matcher:             matcher,
+		Dispatch:            s.extDispatch,
+		Themes:              themes,
+		ActiveName:          activeName,
+		Defaults:            resolved,
 		CSSChain:            cssChain,
 		JSChain:             jsChain,
 		ChromaLightCSSChain: chromaLightCSSChain,
 		ChromaDarkCSSChain:  chromaDarkCSSChain,
 		TabularCSSChain:     tabularCSSChain,
-		Nav:            autoNav,
-		HeaderNav:      headerNav,
-		Templates:      tpl,
-		Cache:          s.cache,
-		Epoch:          s.epoch,
+		Nav:                 autoNav,
+		HeaderNav:           headerNav,
+		Templates:           tpl,
+		Cache:               s.cache,
+		Epoch:               s.epoch,
 		Markdown: render.NewMarkdownRenderer(render.MarkdownOptions{
 			WikilinkResolver: wikilinkResolver,
 			PDFRenderer:      vyaml.PDFRenderer,
@@ -324,20 +337,25 @@ func (s *Server) buildVaultDeps(themes *theme.Registry, idMap map[string]string,
 		}),
 		WikilinkResolver: wikilinkResolver,
 		Logger:           s.logger,
-		VaultID:     vyaml.VaultID,
-		IDMap:       idMap,
-		PDFRenderer: vyaml.PDFRenderer,
-		Typst:       s.typstRenderer,
-		Index:       idx,
-		Versions:    resolved.Versions,
+		VaultID:          vyaml.VaultID,
+		IDMap:            idMap,
+		PDFRenderer:      vyaml.PDFRenderer,
+		Typst:            s.typstRenderer,
+		Index:            idx,
+		Versions:         resolved.Versions,
 		// Auth fields: threaded in from the server-level singletons so all
 		// handlers share the same Stores lifetime. LoginPath is read once at
 		// build time; a config reload rebuilds deps with the new path.
-		Sessions:    s.sessions,
-		Stores:      s.stores,
-		LoginPath:   s.cfg.GetLoginPath(),
-		BaseURL:     s.cfg.BaseURL(),
-		VaultSearch: vaultSearch,
+		Sessions:      s.sessions,
+		Stores:        s.stores,
+		LoginPath:     s.cfg.GetLoginPath(),
+		BaseURL:       s.cfg.BaseURL(),
+		VaultSearch:   vaultSearch,
+		OGImage:       vyaml.OGImage,
+		OGImageAlt:    vyaml.OGImageAlt,
+		OGImageWidth:  vyaml.OGImageWidth,
+		OGImageHeight: vyaml.OGImageHeight,
+		OGCardLayer:   ogCardLayer,
 	}, nil
 }
 

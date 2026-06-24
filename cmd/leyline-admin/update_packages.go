@@ -85,6 +85,17 @@ func latestRelease(get func(string) (*http.Response, error), repo string) (ghRel
 // does not do this itself.
 func normalizeTag(tag string) string { return strings.TrimPrefix(tag, "v") }
 
+// majorMinor returns the "major.minor" prefix of a dotted version. Under the
+// 0.x policy the minor is the compatibility boundary: crossing it may break the
+// leyline-web engine ↔ web theme-template contract, so the operator's web repo
+// clone has to move to the matching minor too.
+func majorMinor(v string) string {
+	if p := strings.SplitN(v, ".", 3); len(p) >= 2 {
+		return p[0] + "." + p[1]
+	}
+	return v
+}
+
 // assetFileName reproduces the nfpm file_name_template:
 // <pkgName>_<version>_<goarch>.<ext>.
 func assetFileName(pkgName, ver, goarch, ext string) string {
@@ -177,6 +188,7 @@ func runUpdate(_ []string, opts runOpts) int {
 	}
 
 	exitCode := 0
+	minorBump := false      // any behind component crossing a 0.MINOR boundary
 	var downloaded []string // .deb/.rpm paths to install in one command
 	for _, c := range componentsForUpdate() {
 		installedVer, ok := c.installed(lookPath)
@@ -194,6 +206,9 @@ func runUpdate(_ []string, opts runOpts) int {
 		if version.CompareVersions(installedVer, latest) >= 0 {
 			fmt.Fprintf(opts.Stdout, "%-15s up to date\n", c.label)
 			continue
+		}
+		if majorMinor(installedVer) != majorMinor(latest) {
+			minorBump = true
 		}
 		name := assetFileName(c.pkgName, latest, runtime.GOARCH, pm.ext)
 		url, found := pickAsset(rel, name)
@@ -220,6 +235,9 @@ func runUpdate(_ []string, opts runOpts) int {
 	if len(downloaded) > 0 {
 		fmt.Fprintf(opts.Stdout, "\nrun:\nsudo %s %s %s\n",
 			pm.bin, pm.installCmd, strings.Join(downloaded, " "))
+	}
+	if minorBump {
+		fmt.Fprintln(opts.Stdout, "\nnote: this crosses a minor version — if it breaks your site, update your web repo clone to the matching minor too.")
 	}
 	return exitCode
 }

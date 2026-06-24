@@ -73,8 +73,8 @@ type PageContext struct {
 	// carry pre-rendered HTML.
 	LeftSidebar  SidebarRender
 	RightSidebar SidebarRender
-	Now         time.Time
-	EditSwitch  EditSwitchContext
+	Now          time.Time
+	EditSwitch   EditSwitchContext
 	// Auth carries the per-request authentication state for auth_panel.html
 	// and login.html. Populated by Task 4 for normal pages; set directly by
 	// LoginHandler for the login page.
@@ -102,6 +102,15 @@ type PageContext struct {
 	CanonicalURL string
 	Description  string
 	OGType       string
+	// OGImage is the absolute og:image card URL; "" when no card resolved
+	// (twitter:card stays "summary"). OGImageAlt is non-empty whenever OGImage
+	// is. OGImageWidth/OGImageHeight are the card dimensions (default
+	// 1200×630). Populated by WithSEO; the head template emits the image meta
+	// only when OGImage is set.
+	OGImage       string
+	OGImageAlt    string
+	OGImageWidth  int
+	OGImageHeight int
 }
 
 // VersionEntry is one row in the version switcher.
@@ -287,12 +296,16 @@ func (ctx PageContext) WithSidebars(left, right SidebarRender) PageContext {
 	return ctx
 }
 
-// WithSEO returns a copy of ctx with the canonical URL, meta description, and
-// OpenGraph type filled. Empty canonical (Domain unset) leaves the theme-head
-// SEO block unrendered.
-func (ctx PageContext) WithSEO(canonical, description, ogType string) PageContext {
-	ctx.CanonicalURL = canonical
-	ctx.Description = description
-	ctx.OGType = ogType
+// WithSEO returns a copy of ctx with the resolved SEO/OpenGraph head data
+// filled. Empty canonical (Domain unset) leaves the theme-head SEO block
+// unrendered.
+func (ctx PageContext) WithSEO(m seoMeta) PageContext {
+	ctx.CanonicalURL = m.CanonicalURL
+	ctx.Description = m.Description
+	ctx.OGType = m.OGType
+	ctx.OGImage = m.OGImage
+	ctx.OGImageAlt = m.OGImageAlt
+	ctx.OGImageWidth = m.OGImageWidth
+	ctx.OGImageHeight = m.OGImageHeight
 	return ctx
 }

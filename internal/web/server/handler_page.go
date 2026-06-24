@@ -21,8 +21,8 @@ import (
 	"github.com/pawlenartowicz/leyline/internal/web/auth"
 	"github.com/pawlenartowicz/leyline/internal/web/cache"
 	"github.com/pawlenartowicz/leyline/internal/web/render"
-	"github.com/pawlenartowicz/leyline/internal/web/search"
 	"github.com/pawlenartowicz/leyline/internal/web/seam"
+	"github.com/pawlenartowicz/leyline/internal/web/search"
 	"github.com/pawlenartowicz/leyline/internal/web/theme"
 	"github.com/pawlenartowicz/leyline/internal/web/typstrender"
 	"github.com/pawlenartowicz/leyline/internal/web/urlx"
@@ -47,28 +47,28 @@ type MarkdownRenderer interface {
 
 // PageDeps bundles everything PageHandler needs.
 type PageDeps struct {
-	Vault          vault.Vault
-	Matcher        *webignore.Matcher
-	Dispatch       *webignore.Dispatch
-	Themes         *theme.Registry
-	ActiveName     string
-	Defaults       theme.Resolved // chain-merged, vault-overlaid, collapsed; per-vault, build-time
-	CSSChain            []string // theme layers (parent-first) shipping static/theme.css
-	JSChain             []string // theme layers (parent-first) shipping static/theme.js
-	ChromaLightCSSChain []string // theme layers (parent-first) shipping static/chroma-light.css
-	ChromaDarkCSSChain  []string // theme layers (parent-first) shipping static/chroma-dark.css
-	TabularCSSChain     []string // theme layers (parent-first) shipping static/tabular.css
-	Nav            []*render.NavNode  // auto-built directory tree; sidebar consumer
-	HeaderNav      []*render.NavNode  // custom-file nav from `header.navigation`; header consumer (nil when unset/unreadable)
-	Templates      *PageTemplates
-	Cache          *cache.Cache
-	Epoch          *cache.Epoch
-	Markdown       MarkdownRenderer
+	Vault               vault.Vault
+	Matcher             *webignore.Matcher
+	Dispatch            *webignore.Dispatch
+	Themes              *theme.Registry
+	ActiveName          string
+	Defaults            theme.Resolved    // chain-merged, vault-overlaid, collapsed; per-vault, build-time
+	CSSChain            []string          // theme layers (parent-first) shipping static/theme.css
+	JSChain             []string          // theme layers (parent-first) shipping static/theme.js
+	ChromaLightCSSChain []string          // theme layers (parent-first) shipping static/chroma-light.css
+	ChromaDarkCSSChain  []string          // theme layers (parent-first) shipping static/chroma-dark.css
+	TabularCSSChain     []string          // theme layers (parent-first) shipping static/tabular.css
+	Nav                 []*render.NavNode // auto-built directory tree; sidebar consumer
+	HeaderNav           []*render.NavNode // custom-file nav from `header.navigation`; header consumer (nil when unset/unreadable)
+	Templates           *PageTemplates
+	Cache               *cache.Cache
+	Epoch               *cache.Epoch
+	Markdown            MarkdownRenderer
 	// WikilinkResolver resolves [[wikilinks]] in .nav sidebar widgets (and is
 	// the same resolver wired into the markdown renderer). Held here so
 	// per-request widget resolution can parse .nav files.
 	WikilinkResolver render.WikilinkResolver
-	Logger         *slog.Logger
+	Logger           *slog.Logger
 
 	// VaultID is this vault's `vault_id` from web.yaml — used by the
 	// cross-vault transformer for the same-vault-collapse optimisation.
@@ -109,6 +109,19 @@ type PageDeps struct {
 	// canonical/OG URLs; "" disables SEO tags. Read once at deps-build time.
 	BaseURL string
 
+	// OpenGraph card (og:image) defaults, resolved once at deps-build time.
+	// OGImage/OGImageAlt/OGImageWidth/OGImageHeight mirror the web.yaml
+	// og_image* block verbatim (OGImage may be absolute or vault-relative;
+	// width/height 0 mean "use the 1200×630 default"). OGCardLayer is the
+	// theme-chain layer that ships the bundled default card
+	// (static/og-card.png), "" when no layer does. seoContext layers a
+	// page's frontmatter image:/image_alt: over these.
+	OGImage       string
+	OGImageAlt    string
+	OGImageWidth  int
+	OGImageHeight int
+	OGCardLayer   string
+
 	// VaultSearch is the lazy-built full-text search index for this vault.
 	// nil when search is not configured or disabled for the vault.
 	VaultSearch *search.VaultSearch
@@ -127,8 +140,8 @@ type PageTemplates struct {
 	Page     *template.Template
 	Index    *template.Template
 	NotFound *template.Template
-	PDF      *template.Template   // nil when no theme in the chain provides pdf.html
-	Login    *template.Template   // nil when no theme in the chain provides login.html
+	PDF      *template.Template // nil when no theme in the chain provides pdf.html
+	Login    *template.Template // nil when no theme in the chain provides login.html
 }
 
 // LoadTemplates parses the standard template files through the active theme's
@@ -481,8 +494,8 @@ func (d *PageDeps) renderMarkdownPage(body []byte, relPath string, mode render.E
 		d.vaultInfo(),
 		d.themeInfo(),
 		d.Nav, d.HeaderNav).WithEditSwitch(switchCtx).WithVersion(d.buildVersionContext(tag, relPath)).WithAuth(authCtx).
-		WithSidebars(left, right).
-		WithSEO(d.seoContext(relPath, fm, body, webignore.ModeMarkdown))
+		WithSidebars(left, right)
+	ctx = ctx.WithSEO(d.seoContext(relPath, fm, body, webignore.ModeMarkdown, ctx.Title))
 
 	set := d.Templates.Page
 	if isIndexFile(relPath) {
@@ -503,8 +516,8 @@ func (d *PageDeps) renderTextPage(body []byte, relPath string, mode render.EditM
 		d.vaultInfo(),
 		d.themeInfo(),
 		d.Nav, d.HeaderNav).WithEditSwitch(switchCtx).WithVersion(d.buildVersionContext(tag, relPath)).WithAuth(authCtx).
-		WithSidebars(d.defaultSidebars()).
-		WithSEO(d.seoContext(relPath, render.Frontmatter{}, nil, webignore.ModeAsset))
+		WithSidebars(d.defaultSidebars())
+	ctx = ctx.WithSEO(d.seoContext(relPath, render.Frontmatter{}, nil, webignore.ModeAsset, ctx.Title))
 	return executeTemplate(d.Templates.Page, "layout.html", ctx)
 }
 
@@ -517,8 +530,8 @@ func (d *PageDeps) renderTabularPage(body []byte, relPath string, mode render.Ed
 		d.vaultInfo(),
 		d.themeInfo(),
 		d.Nav, d.HeaderNav).WithEditSwitch(switchCtx).WithVersion(d.buildVersionContext(tag, relPath)).WithAuth(authCtx).
-		WithSidebars(d.defaultSidebars()).
-		WithSEO(d.seoContext(relPath, render.Frontmatter{}, nil, webignore.ModeAsset))
+		WithSidebars(d.defaultSidebars())
+	ctx = ctx.WithSEO(d.seoContext(relPath, render.Frontmatter{}, nil, webignore.ModeAsset, ctx.Title))
 	return executeTemplate(d.Templates.Page, "layout.html", ctx)
 }
 
@@ -577,8 +590,8 @@ func (d *PageDeps) renderTypstPage(ctx context.Context, body []byte, relPath str
 		d.vaultInfo(),
 		d.themeInfo(),
 		d.Nav, d.HeaderNav).WithEditSwitch(switchCtx).WithVersion(d.buildVersionContext(tag, relPath)).WithAuth(authCtx).
-		WithSidebars(d.defaultSidebars()).
-		WithSEO(d.seoContext(relPath, render.Frontmatter{}, nil, webignore.ModeAsset))
+		WithSidebars(d.defaultSidebars())
+	pageCtx = pageCtx.WithSEO(d.seoContext(relPath, render.Frontmatter{}, nil, webignore.ModeAsset, pageCtx.Title))
 	html, err := executeTemplate(d.Templates.Page, "layout.html", pageCtx)
 	if err != nil {
 		return "", false, err
@@ -1009,15 +1022,15 @@ func renderNotFoundForTag(w http.ResponseWriter, deps *PageDeps, rawTag, subPath
 	th := deps.themeInfo()
 	left, right := deps.defaultSidebars()
 	ctx := PageContext{
-		Title:   "Not Found",
-		Path:    subPath,
-		Vault:     deps.vaultInfo(),
-		Theme:     th,
-		Nav:       deps.Nav,
-		HeaderNav: deps.HeaderNav,
-		Now:       time.Now().UTC(),
-		Version: deps.buildVersionContext(rawTag, subPath),
-		Custom:  th.Defaults.Custom,
+		Title:        "Not Found",
+		Path:         subPath,
+		Vault:        deps.vaultInfo(),
+		Theme:        th,
+		Nav:          deps.Nav,
+		HeaderNav:    deps.HeaderNav,
+		Now:          time.Now().UTC(),
+		Version:      deps.buildVersionContext(rawTag, subPath),
+		Custom:       th.Defaults.Custom,
 		LeftSidebar:  left,
 		RightSidebar: right,
 	}
