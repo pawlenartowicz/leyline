@@ -143,6 +143,12 @@ func runOneShotSession(ctx context.Context, vaultRoot, keysPath string, opts one
 
 	disk := daemon.NewDiskFileIO(vaultRoot)
 
+	// Deferred status line (TTY only): names the current phase after 2s so a
+	// long sync isn't a silent gap. Close clears it before the stdout "ok".
+	st := newStatus()
+	defer st.Close()
+
+	st.Set("connecting…")
 	cli := leysync.NewClient()
 	authOK, err := cli.Dial(ctx, leysync.DialOpts{
 		URL:           cfg.Vault,
@@ -164,6 +170,10 @@ func runOneShotSession(ctx context.Context, vaultRoot, keysPath string, opts one
 			break
 		}
 	}
+
+	// One label spans both local hashing passes below: base-snapshot verify
+	// and the working-tree reconcile walk.
+	st.Set("checking local files…")
 
 	// Base-snapshot verification — confirms base/ snapshot content matches
 	// manifest hashes, repairing drifted entries in place from the live tree
@@ -270,6 +280,7 @@ func runOneShotSession(ctx context.Context, vaultRoot, keysPath string, opts one
 		Discard:             opts.Mode == oneShotModePull && opts.Discard,
 		InitMode:            opts.InitMode,
 		BypassBulkThreshold: opts.BypassBulkThreshold,
+		OnPhase:             st.Set,
 	})
 
 	if err := engine.RunSession(ctx); err != nil {

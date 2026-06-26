@@ -720,6 +720,91 @@ func TestEnginePushAckOKWithBufferedBroadcastApplies(t *testing.T) {
 	}
 }
 
+// TestEngineOnPhaseFiresInOrder verifies the one-shot status callback fires
+// with the network-phase labels in execution order: receive → push → finish.
+// A full ModeSync session over catchup + push + flush exercises all three.
+func TestEngineOnPhaseFiresInOrder(t *testing.T) {
+	head1 := hashOf("HEAD-1")
+	head2 := hashOf("HEAD-2") // after catchup applies
+	head3 := hashOf("HEAD-3") // after our push commits
+
+	f := newEngineFixture(t, func(c *websocket.Conn) {
+		recvAuth(c)
+		sendAuthOK(t, c)
+
+		_, _ = recvFrame(t, c) // Hello
+		sendCBOR(t, c, protocol.HelloOKMsg{
+			Type: protocol.MsgHelloOK, State: protocol.HelloStateCatchup,
+		})
+		sendCBOR(t, c, protocol.CatchupMsg{
+			Type: protocol.MsgCatchup, From: head1, To: head2, More: false,
+			Ops: []protocol.Op{
+				{Seq: 5, Type: protocol.OpWrite, Path: "remote.md", Data: []byte("remote"), TS: 1},
+			},
+		})
+
+		_, msg := recvFrame(t, c) // PushBatch
+		pb := msg.(*protocol.PushBatchMsg)
+		sendCBOR(t, c, protocol.PushAckMsg{
+			Type: protocol.MsgPushAck, BatchID: pb.BatchID,
+			Result: protocol.PushAckOK, NewBase: head3,
+		})
+
+		_, msg = recvFrame(t, c) // Flush
+		if fm, ok := msg.(*protocol.FlushMsg); ok {
+			sendCBOR(t, c, protocol.FlushAckMsg{
+				Type: protocol.MsgFlushAck, FlushID: fm.FlushID, Head: head3,
+			})
+		}
+	})
+	defer f.close()
+
+	prev := head1
+	f.base.Base = &prev
+	_ = stage.WriteBase(f.basePath, *f.base)
+	_ = f.staged.Append(stage.StagedOp{Op: protocol.Op{
+		Seq: 1, Type: protocol.OpWrite, Path: "mine.md", Data: []byte("mine"), TS: 2,
+	}})
+
+	// OnPhase runs on RunSession's own goroutine in ModeSync, so a plain
+	// slice append is race-free here.
+	var phases []string
+	eng := NewEngine(EngineOpts{
+		Mode:         ModeSync,
+		VaultRoot:    f.tmp,
+		FS:           f.fs,
+		Filter:       f.filter,
+		Client:       f.cli,
+		Base:         f.base,
+		BasePath:     f.basePath,
+		Manifest:     f.manifest,
+		Staged:       f.staged,
+		Acked:        f.acked,
+		BaseStore:    f.baseStore,
+		ConflictsLog: f.conflicts,
+		ClientID:     f.clientID,
+		Keyname:      f.keyname,
+		DiffMode:     "leyline",
+		OnPhase:      func(label string) { phases = append(phases, label) },
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := eng.RunSession(ctx); err != nil {
+		t.Fatalf("RunSession: %v", err)
+	}
+
+	want := []string{"receiving changes…", "pushing changes…", "finishing…"}
+	if len(phases) != len(want) {
+		t.Fatalf("phases = %v, want %v", phases, want)
+	}
+	for i := range want {
+		if phases[i] != want[i] {
+			t.Fatalf("phase[%d] = %q, want %q (full: %v)", i, phases[i], want[i], phases)
+		}
+	}
+}
+
 // TestEngineStaleBaseWithEmptyBufferFallsBackToHello verifies that when
 // stale_base arrives without a preceding broadcast (ack-before-broadcast
 // race), the engine reverts to the existing Hello-based staleBaseRetry

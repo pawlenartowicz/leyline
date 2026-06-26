@@ -69,6 +69,10 @@ type EngineOpts struct {
 	// (Base advanced from a server-pushed change set). Used by the
 	// daemon to refresh its last-sync timestamp. Nil-safe.
 	OnCatchup func()
+	// OnPhase fires when the engine enters a new network phase
+	// (receive / push / flush). Used by the one-shot CLI for its status
+	// line. Nil-safe; daemon and tests pass nothing.
+	OnPhase func(string)
 	// Now overrides the timestamp source for inbound-delete trash. Set in
 	// tests to make trash-bucket directory names deterministic.
 	// Nil → time.Now (UTC).
@@ -209,10 +213,16 @@ func (e *Engine) RunSession(ctx context.Context) error {
 			return err
 		}
 	case protocol.HelloStateCatchup:
+		if e.opts.OnPhase != nil {
+			e.opts.OnPhase("receiving changes…")
+		}
 		if err := e.applyCatchup(ctx); err != nil {
 			return err
 		}
 	case protocol.HelloStateBootstrap:
+		if e.opts.OnPhase != nil {
+			e.opts.OnPhase("receiving changes…")
+		}
 		if err := e.applyBootstrap(ctx); err != nil {
 			return err
 		}
@@ -240,6 +250,9 @@ func (e *Engine) RunSession(ctx context.Context) error {
 	// Push policy by mode.
 	switch e.opts.Mode {
 	case ModeSync, ModeAutosync:
+		if e.opts.OnPhase != nil {
+			e.opts.OnPhase("pushing changes…")
+		}
 		if err := e.pushIfNeeded(ctx); err != nil {
 			return err
 		}
@@ -1625,6 +1638,9 @@ func (e *Engine) pushOnceReturnAck(ctx context.Context) (*protocol.PushAckMsg, [
 // flushAndExit sends a FlushMsg, waits up to flushTimeout for FlushAck,
 // and returns. The caller is expected to Close the connection after.
 func (e *Engine) flushAndExit(ctx context.Context) error {
+	if e.opts.OnPhase != nil {
+		e.opts.OnPhase("finishing…")
+	}
 	flushID := e.opts.Base.NextBatchID
 	if err := e.opts.Client.Send(protocol.FlushMsg{
 		Type:    protocol.MsgFlush,
