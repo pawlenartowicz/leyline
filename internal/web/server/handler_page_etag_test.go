@@ -55,6 +55,7 @@ func setupPDFFixture(t *testing.T, withPDFTemplate bool) (*fixtureBundle, string
 		"page.html":   `{{define "main"}}{{.Content}}{{end}}`,
 		"index.html":  `{{define "main"}}INDEX{{end}}`,
 		"404.html":    `{{define "main"}}404{{end}}`,
+		"panel.html":  `<!doctype html><html><body>panel</body></html>`,
 	}
 	if withPDFTemplate {
 		templates["pdf.html"] = `{{define "main"}}PDF VIEWER{{end}}`

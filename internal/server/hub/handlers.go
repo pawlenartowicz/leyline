@@ -239,6 +239,22 @@ func (h *Hub) handlePushBatch(c *Client, vs *VaultState, msg *protocol.PushBatch
 				return
 			}
 		}
+		// .leyline/vaultconfig/access is server-authoritative — written only by
+		// the key API and committed server-side via CommitControlPlane. Refuse
+		// any inbound push of it as a recoverable filter, not a hard error: the
+		// whole batch is rejected (PushAckFiltered, like the [sync] gate below),
+		// the client drops the access op and retries the clean remainder, instead
+		// of believing a divergent local copy landed.
+		// Applies to every client, admins included; roles/web.yaml/etc. stay
+		// pushable. Fires only on a genuine local-edit attempt (steady-state
+		// reconcile dedups the server-authored copy against the manifest), so
+		// the Info log is not per-cycle noise.
+		if p := accessOpPath(op); p != "" {
+			filtered = append(filtered, p)
+			slog.Info("refused client push of server-authoritative access file",
+				"vault", vs.vaultID, "key", c.keyname)
+			continue
+		}
 		if vs.rules == nil {
 			continue
 		}
@@ -780,6 +796,27 @@ func opTouchesVaultConfig(op protocol.Op) bool {
 		return pathutil.IsVaultConfigPath(op.From) || pathutil.IsVaultConfigPath(op.To)
 	}
 	return false
+}
+
+// accessOpPath returns the path at which op touches the server-authoritative
+// access file (accessControlPlanePath), or "" if it does not. A write/delete
+// is keyed by Path; a rename is caught at either endpoint (moving the file out
+// is as much a mutation as overwriting it).
+func accessOpPath(op protocol.Op) string {
+	switch op.Type {
+	case protocol.OpRename:
+		if op.From == accessControlPlanePath {
+			return op.From
+		}
+		if op.To == accessControlPlanePath {
+			return op.To
+		}
+	default:
+		if op.Path == accessControlPlanePath {
+			return op.Path
+		}
+	}
+	return ""
 }
 
 // filterVisibleOps returns the subset of ops a recipient may receive. Admins

@@ -190,6 +190,19 @@ func (a *AdminAPI) isKnownRole(vs *hub.VaultState, name string) bool {
 	return ok
 }
 
+// commitAccess folds the post-op access file into git history and broadcasts
+// it to connected admins. Called after a structural key op (create / delete /
+// update-role) whose access-store write already flushed to disk. A commit
+// failure is logged, never surfaced: the key change is already live on disk and
+// reaches history via the next structural commit or the hydrate backfill, so
+// failing the request (and losing a freshly minted token to a 500) would be the
+// worse outcome.
+func commitAccess(h *hub.Hub, vs *hub.VaultState, vaultID, author string) {
+	if err := h.CommitControlPlane(vs, ".leyline/vaultconfig/access", author); err != nil {
+		slog.Error("commit access after key op failed", "vault", vaultID, "err", err)
+	}
+}
+
 func (a *AdminAPI) createKey(w http.ResponseWriter, r *http.Request) {
 	vs := vsFromContext(r)
 	vaultID := r.PathValue("vault")
@@ -220,6 +233,7 @@ func (a *AdminAPI) createKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metrics.AdminKeyOps.With(vaultID, "create").Inc()
+	commitAccess(a.hub, vs, vaultID, callerName(r))
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"key":  token,
 		"name": req.Name,
@@ -245,6 +259,7 @@ func (a *AdminAPI) deleteKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics.AdminKeyOps.With(vaultID, "delete").Inc()
+	commitAccess(a.hub, vs, vaultID, callerName(r))
 	a.hub.ReevaluateClients(vaultID)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -273,6 +288,7 @@ func (a *AdminAPI) updateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics.AdminKeyOps.With(vaultID, "update_role").Inc()
+	commitAccess(a.hub, vs, vaultID, callerName(r))
 	a.hub.ReevaluateClients(vaultID)
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "role": req.Role})
 }

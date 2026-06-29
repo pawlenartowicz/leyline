@@ -34,6 +34,13 @@ type Config struct {
 	// from explicit "" (operator disabled login). Same pointer-bool
 	// convention used by EditSwitch.Enabled in internal/theme.
 	LoginPath *string `yaml:"login_path"`
+	// ServerAddress is the leyline-server host this web relays mutations to,
+	// in canonical bare form (no scheme): "notes.example.com". Set → "paired"
+	// (_panel enabled; web relays writes as the user — login itself is
+	// independent of this field). Empty → the read-only guest mirror (today's
+	// behavior, unchanged). The per-vault address is ServerAddress + "/" + the
+	// vault's web.yaml vault_id.
+	ServerAddress string `yaml:"server_address"`
 }
 
 // Load reads, parses, and validates a config.yaml file.

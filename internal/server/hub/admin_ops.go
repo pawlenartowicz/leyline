@@ -111,10 +111,56 @@ func bootstrapAccessFile(path, name, role, token string) error {
 	hash := access.TokenHash(token)
 	generated := time.Now().UTC().Format("2006-01-02T15:04")
 	line := strings.Join([]string{name, role, hash, generated, "-", "-", "-"}, "\t")
+	// Header mirrors access.Store.serialize() — keep the two in sync.
 	header := "# .leyline/vaultconfig/access — vault identity and roles\n" +
 		"# name\trole\thash\tgenerated\tlast_seen\texpires_at\temail\n" +
-		"# Managed via admin API. Manual edits are supported.\n"
+		"# Managed by the key API: leyline admin keys {create,list,delete,update-role}\n" +
+		"# (laptop) / leyline-admin keys … (server box) / the web panel's Keys section.\n" +
+		"# Read-only on synced clients. Server-box manual edits fold into history on\n" +
+		"# the next structural key op or hydrate.\n"
 	return os.WriteFile(path, []byte(header+line+"\n"), 0o644)
+}
+
+// accessControlPlanePath is the in-vault (forward-slash) path of the
+// server-authoritative access file. Server-written, committed via
+// CommitControlPlane, read-only on synced clients (see the push-side filter in
+// handlePushBatch).
+const accessControlPlanePath = ".leyline/vaultconfig/access"
+
+// CommitControlPlane folds the current on-disk state of a server-authored
+// control-plane file (currently only the access file) into git history and
+// broadcasts the resulting op to connected admins. Server-authoritative files
+// never travel the client push lane — they are written by the key API and
+// committed here — so this is how a structural key op reaches history and the
+// admin read-only replicas.
+//
+// Reads the file fresh from disk under fileMu: that makes concurrent key ops
+// race-safe and idempotent (a second op that finds the file already committed
+// produces a clean no-op via CommitOps). Ordering mirrors commitStage exactly —
+// commit under fileMu, set headHashCached, then broadcastOps — so the
+// HEAD-then-broadcast invariant other handlers rely on holds. broadcastOps'
+// per-recipient filter drops the vaultconfig op for non-admins, so only admins
+// receive it.
+func (h *Hub) CommitControlPlane(vs *VaultState, relPath, author string) error {
+	vs.fileMu.Lock()
+	defer vs.fileMu.Unlock()
+
+	data, err := os.ReadFile(filepath.Join(vs.disk.Root(), filepath.FromSlash(relPath)))
+	if err != nil {
+		return fmt.Errorf("read control-plane file %s: %w", relPath, err)
+	}
+	prevHead := vs.headHashCached
+	ops := []protocol.Op{{Type: protocol.OpWrite, Path: relPath, Data: data, Author: author}}
+	head, err := vs.git.CommitOps(ops, author)
+	if err != nil {
+		return fmt.Errorf("commit control-plane %s: %w", relPath, err)
+	}
+	if head == prevHead {
+		return nil // content unchanged — CommitOps no-op'd, nothing to broadcast
+	}
+	vs.headHashCached = head
+	h.broadcastOps(vs, "", prevHead, head, ops)
+	return nil
 }
 
 // DestroyVault performs the ordered sequence:

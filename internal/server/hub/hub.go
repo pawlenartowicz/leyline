@@ -529,19 +529,36 @@ func (h *Hub) hydrate(vaultID string, vs *VaultState) error {
 	if err != nil {
 		return fmt.Errorf("git status: %w", err)
 	}
+	var paths []string
 	if len(dirty) > 0 {
-		paths := filterByHistoryAllowlist(dirty, rules)
+		paths = filterByHistoryAllowlist(dirty, rules)
 		for _, d := range dirty {
 			if d.Path == ".gitignore" {
 				paths = append(paths, ".gitignore")
 				break
 			}
 		}
-		if len(paths) > 0 {
-			msg := fmt.Sprintf("recovery: %s", time.Now().UTC().Format(time.RFC3339))
-			if err := gitStore.AddAndCommit(paths, msg); err != nil {
-				return fmt.Errorf("recovery commit: %w", err)
-			}
+	}
+	// .leyline/vaultconfig/access is server-authoritative and gitignored, so
+	// StatusPorcelain never surfaces it — fold it in explicitly whenever it
+	// exists on disk, independent of `dirty`. New vaults get it into HEAD from
+	// their first commit; existing vaults whose access was only ever written
+	// straight to disk backfill it on their next hydrate, after which admins
+	// receive it via normal catchup. go-git's force-Add in AddAndCommit
+	// overrides the .leyline/ ignore; an already-committed unchanged file
+	// no-ops cleanly. Mirrors the .gitignore special-case above.
+	if _, err := os.Stat(layout.AccessFile(vaultDir)); err == nil {
+		paths = append(paths, ".leyline/vaultconfig/access")
+	}
+	if len(paths) > 0 {
+		headBefore, _ := gitStore.HeadHash()
+		msg := fmt.Sprintf("recovery: %s", time.Now().UTC().Format(time.RFC3339))
+		if err := gitStore.AddAndCommit(paths, msg); err != nil {
+			return fmt.Errorf("recovery commit: %w", err)
+		}
+		// Log only when a commit actually landed: the access force-add runs on
+		// every hydrate and usually no-ops, which is not a recovery event.
+		if headAfter, _ := gitStore.HeadHash(); headAfter != headBefore {
 			slog.Warn("recovery commit", "vault", vaultID, "paths", len(paths))
 		}
 	}

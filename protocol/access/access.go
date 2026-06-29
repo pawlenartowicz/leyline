@@ -451,10 +451,14 @@ func serializeEntry(e entry) (string, error) {
 // serialize builds the file body (header comment + tab-separated rows with
 // "-" for empty optional fields).
 func (s *Store) serialize() []byte {
+	// Header mirrors hub.bootstrapAccessFile — keep the two in sync.
 	var lines []string
 	lines = append(lines, "# .leyline/vaultconfig/access — vault identity and roles")
 	lines = append(lines, "# name\trole\thash\tgenerated\tlast_seen\texpires_at\temail")
-	lines = append(lines, "# Managed via admin API. Manual edits are supported.")
+	lines = append(lines, "# Managed by the key API: leyline admin keys {create,list,delete,update-role}")
+	lines = append(lines, "# (laptop) / leyline-admin keys … (server box) / the web panel's Keys section.")
+	lines = append(lines, "# Read-only on synced clients. Server-box manual edits fold into history on")
+	lines = append(lines, "# the next structural key op or hydrate.")
 	for _, e := range s.entries {
 		line, err := serializeEntry(e)
 		if err != nil {

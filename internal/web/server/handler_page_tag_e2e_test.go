@@ -36,6 +36,7 @@ func setupVersionedVault(t *testing.T) (string, string, *config.Config) {
 		"page.html":              `{{define "main"}}{{.Content}}{{end}}`,
 		"index.html":              `{{define "main"}}idx::{{.Content}}{{end}}`,
 		"404.html":               `{{define "main"}}404:{{.Version.RequestedTag}}:{{.Version.RequestedPath}}{{end}}`,
+		"panel.html":             `<!doctype html><html><body>panel</body></html>`,
 		"header.html":            ``,
 		"footer.html":            ``,
 		"sidebar.html":           ``,

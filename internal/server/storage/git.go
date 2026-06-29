@@ -480,6 +480,13 @@ func (g *GitStore) AddAndCommit(paths []string, msg string) error {
 			When:  time.Now().UTC(),
 		},
 	})
+	// The hydrate backfill force-adds .leyline/vaultconfig/access on every
+	// hydrate; when it (and any other listed path) already matches HEAD the
+	// staged tree is unchanged. Treat that as a clean no-op rather than an
+	// error — mirrors CommitOps' ErrEmptyCommit handling.
+	if errors.Is(err, git.ErrEmptyCommit) {
+		return nil
+	}
 	return err
 }
 

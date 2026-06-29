@@ -328,3 +328,34 @@ func TestBaseURLAndSitemapURL(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadServerAddress(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(
+		"listen: \":8080\"\nserver_address: notes.example.com\nvaults:\n  /: "+dir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ServerAddress != "notes.example.com" {
+		t.Errorf("ServerAddress = %q, want notes.example.com", cfg.ServerAddress)
+	}
+}
+
+func TestLoadServerAddressDefaultsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("listen: \":8080\"\nvaults:\n  /: "+dir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ServerAddress != "" {
+		t.Errorf("ServerAddress = %q, want empty (unpaired)", cfg.ServerAddress)
+	}
+}

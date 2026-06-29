@@ -77,6 +77,15 @@ func setupAuthFixture(t *testing.T, vaultDir string, stores *auth.Stores, sessio
 		"page.html":   `{{define "main"}}{{.Content}}{{end}}`,
 		"index.html":  `{{define "main"}}idx{{end}}`,
 		"404.html":    `{{define "main"}}404{{end}}`,
+		// Stand-in for the real panel.html: renders cap-allowed sections from
+		// panelView so TestPanelGETGating can assert on the gated section ids.
+		"panel.html": `<!doctype html><html><body>` +
+			`{{if .Allowed.webyaml}}<section id="webyaml"><textarea name="content">{{.WebYAML.Content}}</textarea></section>{{end}}` +
+			`{{if .Allowed.webignore}}<section id="webignore"><textarea name="content">{{.WebIgnore.Content}}</textarea></section>{{end}}` +
+			`{{if .Allowed.roles}}<section id="roles"><textarea name="content">{{.Roles.Content}}</textarea></section>{{end}}` +
+			`{{if .Allowed.keys}}<section id="keys">keys</section>{{end}}` +
+			`{{if .Allowed.vaults}}<section id="vaults">vaults</section>{{end}}` +
+			`</body></html>`,
 	} {
 		if err := os.WriteFile(filepath.Join(base, fname), []byte(body), 0644); err != nil {
 			t.Fatal(err)
@@ -363,6 +372,15 @@ func buildMinimalServer(t *testing.T, loginPath string) *Server {
 		"page.html":   `{{define "main"}}{{.Content}}{{end}}`,
 		"index.html":  `{{define "main"}}idx{{end}}`,
 		"404.html":    `{{define "main"}}404{{end}}`,
+		// Stand-in for the real panel.html: renders cap-allowed sections from
+		// panelView so TestPanelGETGating can assert on the gated section ids.
+		"panel.html": `<!doctype html><html><body>` +
+			`{{if .Allowed.webyaml}}<section id="webyaml"><textarea name="content">{{.WebYAML.Content}}</textarea></section>{{end}}` +
+			`{{if .Allowed.webignore}}<section id="webignore"><textarea name="content">{{.WebIgnore.Content}}</textarea></section>{{end}}` +
+			`{{if .Allowed.roles}}<section id="roles"><textarea name="content">{{.Roles.Content}}</textarea></section>{{end}}` +
+			`{{if .Allowed.keys}}<section id="keys">keys</section>{{end}}` +
+			`{{if .Allowed.vaults}}<section id="vaults">vaults</section>{{end}}` +
+			`</body></html>`,
 	} {
 		if err := os.WriteFile(filepath.Join(base, fname), []byte(body), 0644); err != nil {
 			t.Fatal(err)

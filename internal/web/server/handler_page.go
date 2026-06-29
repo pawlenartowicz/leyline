@@ -20,6 +20,7 @@ import (
 
 	"github.com/pawlenartowicz/leyline/internal/web/auth"
 	"github.com/pawlenartowicz/leyline/internal/web/cache"
+	"github.com/pawlenartowicz/leyline/internal/web/gateway"
 	"github.com/pawlenartowicz/leyline/internal/web/render"
 	"github.com/pawlenartowicz/leyline/internal/web/seam"
 	"github.com/pawlenartowicz/leyline/internal/web/search"
@@ -54,6 +55,7 @@ type PageDeps struct {
 	ActiveName          string
 	Defaults            theme.Resolved    // chain-merged, vault-overlaid, collapsed; per-vault, build-time
 	CSSChain            []string          // theme layers (parent-first) shipping static/theme.css
+	PanelCSSChain       []string          // theme layers (parent-first) shipping static/panel.css; _panel <head> links these
 	JSChain             []string          // theme layers (parent-first) shipping static/theme.js
 	ChromaLightCSSChain []string          // theme layers (parent-first) shipping static/chroma-light.css
 	ChromaDarkCSSChain  []string          // theme layers (parent-first) shipping static/chroma-dark.css
@@ -125,6 +127,11 @@ type PageDeps struct {
 	// VaultSearch is the lazy-built full-text search index for this vault.
 	// nil when search is not configured or disabled for the vault.
 	VaultSearch *search.VaultSearch
+
+	// Gateway is the outbound client to leyline-server (server_address). Same
+	// pointer across all vaults. nil when the web is unpaired (server_address
+	// unset) — _panel and login-relayed writes are disabled in that case.
+	Gateway *gateway.Gateway
 }
 
 // PageTemplates holds one parsed template set per page kind (page, index,
@@ -142,6 +149,7 @@ type PageTemplates struct {
 	NotFound *template.Template
 	PDF      *template.Template // nil when no theme in the chain provides pdf.html
 	Login    *template.Template // nil when no theme in the chain provides login.html
+	Panel    *template.Template // required: the _panel management surface (panel.html)
 }
 
 // LoadTemplates parses the standard template files through the active theme's
@@ -208,6 +216,21 @@ func LoadTemplates(themes *theme.Registry, vaultDir, activeTheme string) (*PageT
 		return nil, err
 	}
 	if pt.NotFound, err = parsePage("404.html"); err != nil {
+		return nil, err
+	}
+	// panel.html is REQUIRED (like page.html): the _panel surface carries no
+	// inlined engine fallback — its entire presentation lives in the theme.
+	// The engine renders it from a panelView and dispatches only on this
+	// documented contract, which panel.html must honour (everything else is
+	// the theme's to set):
+	//   - each section element's id equals its section key (webyaml /
+	//     webignore / roles / keys / vaults), for the inline tab JS;
+	//   - section forms POST {{.Action}} with the hidden field names the
+	//     handler switches on — section, op, name, role, content (and id for
+	//     vaults) — see handlePanelPost.
+	// The contract is documented, not render-test-enforced (coarse by intent);
+	// the integration relay test exercises the wired path end to end.
+	if pt.Panel, err = parsePage("panel.html"); err != nil {
 		return nil, err
 	}
 	// pdf.html is optional. Themes that don't ship one fall back to the
@@ -947,6 +970,11 @@ func (d *PageDeps) authPanelContext(r *http.Request) AuthPanelContext {
 			Vault: prefix,
 			Role:  sess.RoleFor(prefix),
 		})
+	}
+	// Surface a "Manage" link to this vault's _panel only when the web relays
+	// mutations (paired) and the session holds a management cap here.
+	if d.Gateway.Paired() && len(sectionsFor(sess.CapsFor(d.Vault.Prefix))) > 0 {
+		ac.PanelURL = panelActionPath(d)
 	}
 	return ac
 }

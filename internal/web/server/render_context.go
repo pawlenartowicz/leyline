@@ -34,6 +34,10 @@ type AuthPanelContext struct {
 	// ReturnURL is the post-login redirect target, preserved across bad-token
 	// retries via a hidden form field in login.html.
 	ReturnURL string
+	// PanelURL is the management surface (<prefix>/_panel) for this vault, set
+	// only when the web is paired (server_address) AND the session holds at
+	// least one management capability here. "" hides the "Manage" link.
+	PanelURL string
 }
 
 // VaultRoleEntry is one row in the "Logged in as … — role in vault" display.

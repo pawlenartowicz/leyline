@@ -19,6 +19,7 @@ import (
 	"github.com/pawlenartowicz/leyline/internal/web/auth"
 	"github.com/pawlenartowicz/leyline/internal/web/cache"
 	"github.com/pawlenartowicz/leyline/internal/web/config"
+	"github.com/pawlenartowicz/leyline/internal/web/gateway"
 	"github.com/pawlenartowicz/leyline/internal/web/pdfrender"
 	"github.com/pawlenartowicz/leyline/internal/web/render"
 	"github.com/pawlenartowicz/leyline/internal/web/search"
@@ -68,6 +69,11 @@ type Server struct {
 	limiter        *auth.IPLimiter
 	sessions       *authSessionsAdapter
 	loginTemplates *PageTemplates // nil when no themes are loaded yet
+
+	// gateway is the outbound client to leyline-server (cfg.ServerAddress).
+	// Built once, shared by every vault's PageDeps. nil when the web is
+	// unpaired (server_address unset) — _panel is then disabled.
+	gateway *gateway.Gateway
 }
 
 // New constructs a Server from config and a themes-root directory.
@@ -117,6 +123,7 @@ func New(cfg *config.Config, themesRoot string) (*Server, error) {
 		stores:          stores,
 		limiter:         limiter,
 		sessions:        sessions,
+		gateway:         gateway.New(cfg.ServerAddress, cfg.DevMode),
 		searchCacheBase: search.DefaultSearchCacheDir(),
 	}
 
@@ -236,6 +243,12 @@ func (s *Server) buildVaultDeps(themes *theme.Registry, idMap map[string]string,
 	if err != nil {
 		return nil, fmt.Errorf("css chain: %w", err)
 	}
+	// panel.css is the _panel's own layout sheet; a child theme may override it
+	// per-layer, hence its own chain (ChainAssets skips layers without the file).
+	panelCSSChain, err := themes.ChainAssets(activeName, v.Root, "static/panel.css")
+	if err != nil {
+		return nil, fmt.Errorf("panel css chain: %w", err)
+	}
 	jsChain, err := themes.ChainAssets(activeName, v.Root, "static/theme.js")
 	if err != nil {
 		return nil, fmt.Errorf("js chain: %w", err)
@@ -321,6 +334,7 @@ func (s *Server) buildVaultDeps(themes *theme.Registry, idMap map[string]string,
 		ActiveName:          activeName,
 		Defaults:            resolved,
 		CSSChain:            cssChain,
+		PanelCSSChain:       panelCSSChain,
 		JSChain:             jsChain,
 		ChromaLightCSSChain: chromaLightCSSChain,
 		ChromaDarkCSSChain:  chromaDarkCSSChain,
@@ -356,6 +370,7 @@ func (s *Server) buildVaultDeps(themes *theme.Registry, idMap map[string]string,
 		OGImageWidth:  vyaml.OGImageWidth,
 		OGImageHeight: vyaml.OGImageHeight,
 		OGCardLayer:   ogCardLayer,
+		Gateway:       s.gateway,
 	}, nil
 }
 
@@ -760,6 +775,10 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request) {
 	}
 	if subPath == "/_search" {
 		SearchHandler(deps).ServeHTTP(w, r2)
+		return
+	}
+	if subPath == "/_panel" || strings.HasPrefix(subPath, "/_panel/") {
+		PanelHandler(deps).ServeHTTP(w, r2)
 		return
 	}
 	PageHandler(deps).ServeHTTP(w, r2)

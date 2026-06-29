@@ -157,6 +157,7 @@ func makeMinimalThemeRoot(t *testing.T) string {
 		"page.html":   `{{define "content"}}page:{{.Title}}{{end}}`,
 		"index.html":  `{{define "content"}}index:{{.Title}}{{end}}`,
 		"404.html":    `{{define "content"}}404{{end}}`,
+		"panel.html":  `<!doctype html><html><body>panel</body></html>`,
 	}
 	for name, body := range minTpls {
 		if err := os.WriteFile(filepath.Join(tplDir, name), []byte(body), 0o644); err != nil {

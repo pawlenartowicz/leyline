@@ -28,7 +28,7 @@ func vaultPopulated(root string) bool {
 // reservedVaultLevel are URL segments reserved at the position immediately
 // after the vault prefix. A vault containing a top-level entry matching any of
 // these (or starting with '@') refuses to start.
-var reservedVaultLevel = []string{"_theme", "_login", "_logout", "_admin", "_search"}
+var reservedVaultLevel = []string{"_theme", "_login", "_logout", "_panel", "_search"}
 
 // CheckReservedSegments scans every vault's top-level directory and returns an
 // error if any filename collides with a reserved URL segment.

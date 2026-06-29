@@ -37,6 +37,7 @@ func editFixture(t *testing.T, guestRole string) *fixtureBundle {
 		"page.html":        `{{define "main"}}{{template "edit_switch.html" .}}<section>{{.Content}}</section>{{end}}`,
 		"index.html":       `{{define "main"}}{{template "edit_switch.html" .}}<idx>{{.Content}}</idx>{{end}}`,
 		"404.html":         `{{define "main"}}404{{end}}`,
+		"panel.html":       `<!doctype html><html><body>panel</body></html>`,
 		"edit_switch.html": `{{- with .EditSwitch -}}{{if .Visible}}<nav class="switch" data-mode="{{.Mode}}"><a href="{{.PreviewURL}}">P</a><a href="{{.EditURL}}">E</a><a href="{{.SplitURL}}">S</a></nav>{{end}}{{- end -}}`,
 	} {
 		if err := os.WriteFile(filepath.Join(base, fname), []byte(body), 0644); err != nil {
