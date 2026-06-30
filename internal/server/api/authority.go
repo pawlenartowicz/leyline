@@ -8,19 +8,18 @@ package api
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/pawlenartowicz/leyline/protocol/caps"
 
 	"github.com/pawlenartowicz/leyline/internal/server/hub"
 )
 
-// roleLookup answers "what role does this token hold in this vault?".
-// ok=false when the token is unknown in the vault or does not hold
-// VaultAdmin. The hub-backed implementation performs caps.Resolve internally
-// and returns the role string only when VaultAdmin is held.
-// ResolveServerWideAdmin adds its own caps.Resolve as defence-in-depth for
-// built-in roles (so the pure function remains testable without a Hub).
+// roleLookup answers "does this token hold VaultAdmin in this vault, and if so
+// under what role?". ok=false when the token is unknown in the vault or holds a
+// role without VaultAdmin. The hub-backed implementation (hubRoleLookup) performs
+// caps.Resolve against the vault's real custom-roles config, so both built-in
+// admin and any custom role carrying vault.admin qualify. The returned role
+// string is informational; ResolveServerWideAdmin keys only off ok.
 type roleLookup func(vaultID, token string) (role string, ok bool)
 
 // ResolveServerWideAdmin reports whether the given token qualifies as a
@@ -31,24 +30,17 @@ type roleLookup func(vaultID, token string) (role string, ok bool)
 //	        V.server_wide_admins == true AND
 //	        token has caps.VaultAdmin in V.access
 //
-// swaVaults is the result of registry.ServerWideAdminVaults(). lookup is the
-// pluggable hook that, for each candidate vault, reports the role this token
-// holds (if any). Pure function — easy to test.
+// swaVaults is the result of registry.ServerWideAdminVaults(). lookup reports,
+// per candidate vault, whether the token holds VaultAdmin there (ok) — that
+// decision is made once, inside lookup, against the vault's real custom-roles
+// config, so built-in admin and custom vault.admin roles both qualify. Pure
+// function — easy to test.
 func ResolveServerWideAdmin(token string, swaVaults []string, lookup roleLookup) bool {
 	if token == "" {
 		return false
 	}
 	for _, vid := range swaVaults {
-		role, ok := lookup(vid, token)
-		if !ok {
-			continue
-		}
-		// Built-in admin role always carries VaultAdmin; resolve with nil
-		// custom roles map and zero expiry. The hub-backed lookup below
-		// performs the per-vault caps.Resolve with the actual roles config
-		// and only returns the role string when VaultAdmin is already established.
-		set, err := caps.Resolve(role, nil, time.Time{})
-		if err == nil && set.Has(caps.VaultAdmin) {
+		if _, ok := lookup(vid, token); ok {
 			return true
 		}
 	}
