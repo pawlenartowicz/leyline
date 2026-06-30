@@ -391,6 +391,53 @@ func (h *Hub) SetRegistry(r *registry.Registry) { h.registry = r }
 // haven't wired one — callers must guard.
 func (h *Hub) Registry() *registry.Registry { return h.registry }
 
+// AuthorizeServerWide reports whether token qualifies as a server-wide admin:
+// it holds caps.VaultAdmin in at least one vault flagged server_wide_admins=true
+// in the registry. Single source of truth for SWA authority across both the REST
+// plane (api.authorizedServerWide delegates here) and the WS sync-auth fallback
+// (handleConn). Empty token, nil registry, or no SWA vault → false.
+func (h *Hub) AuthorizeServerWide(token string) bool {
+	if token == "" || h.registry == nil {
+		return false
+	}
+	return resolveServerWideAdmin(token, h.registry.ServerWideAdminVaults(), h.isVaultAdmin)
+}
+
+// isVaultAdmin reports whether token resolves to a VaultAdmin-carrying capability
+// set in vaultID, honouring the vault's custom-roles config AND key expiry. This
+// IS the per-vault authority decision: built-in admin and any custom role that
+// carries vault.admin both qualify. false on unknown vault, unknown/expired key,
+// or a role lacking vault.admin.
+func (h *Hub) isVaultAdmin(vaultID, token string) bool {
+	vs, err := h.GetOrHydrate(vaultID)
+	if err != nil {
+		return false
+	}
+	res, err := vs.accessStore.Authenticate(token)
+	if err != nil {
+		return false
+	}
+	set, err := caps.Resolve(res.Role, vs.rolesConfig.Roles(), res.ExpiresAt)
+	return err == nil && set.Has(caps.VaultAdmin)
+}
+
+// resolveServerWideAdmin is the pure core of AuthorizeServerWide: token is a SWA
+// when it holds VaultAdmin (per isAdmin) in some vault in swaVaults. The VaultAdmin
+// decision is made ONCE, in isAdmin, against the vault's real custom-roles config.
+// (A prior version re-resolved the role here with a nil custom-roles map, which
+// silently rejected custom-role admins — that second resolve is deliberately gone.)
+func resolveServerWideAdmin(token string, swaVaults []string, isAdmin func(vaultID, token string) bool) bool {
+	if token == "" {
+		return false
+	}
+	for _, vid := range swaVaults {
+		if isAdmin(vid, token) {
+			return true
+		}
+	}
+	return false
+}
+
 // vaultPath resolves the on-disk root for vaultID via the registry.
 // Returns ("", false) when vaultID is not registered or no registry is set.
 func (h *Hub) vaultPath(vaultID string) (string, bool) {
@@ -1331,22 +1378,34 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auth scoped to this vault only
+	// Auth scoped to this vault only.
 	res, err := vs.accessStore.Authenticate(authMsg.Key)
+	var set caps.Set
 	if err != nil {
-		metrics.WSAuthFailures.With(vaultID, "invalid_key").Inc()
-		limiter.Record()
-		writeDirect(conn, protocol.AuthFailMsg{Type: protocol.MsgAuthFail, Reason: "invalid key"})
-		conn.Close()
-		return
-	}
-	set, err := caps.Resolve(res.Role, vs.rolesConfig.Roles(), res.ExpiresAt)
-	if err != nil {
-		metrics.WSAuthFailures.With(vaultID, "invalid_role").Inc()
-		limiter.Record()
-		writeDirect(conn, protocol.AuthFailMsg{Type: protocol.MsgAuthFail, Reason: "invalid role"})
-		conn.Close()
-		return
+		// A server-wide admin key minted in another vault is absent from THIS
+		// vault's access file, so Authenticate fails — but a SWA is a full admin
+		// here too. Mirrors the REST plane's token-from-another-vault fallback
+		// (internal/server/api/admin.go) so the web panel's cross-vault config
+		// push (Gateway.PushFile) commits. No rate-limit Record on this path: a
+		// valid SWA key is not a failed auth.
+		if !h.AuthorizeServerWide(authMsg.Key) {
+			metrics.WSAuthFailures.With(vaultID, "invalid_key").Inc()
+			limiter.Record()
+			writeDirect(conn, protocol.AuthFailMsg{Type: protocol.MsgAuthFail, Reason: "invalid key"})
+			conn.Close()
+			return
+		}
+		set, _ = caps.Resolve("admin", nil, time.Time{})
+		res = access.AuthResult{Name: "server-wide-admin", Role: "admin"}
+	} else {
+		set, err = caps.Resolve(res.Role, vs.rolesConfig.Roles(), res.ExpiresAt)
+		if err != nil {
+			metrics.WSAuthFailures.With(vaultID, "invalid_role").Inc()
+			limiter.Record()
+			writeDirect(conn, protocol.AuthFailMsg{Type: protocol.MsgAuthFail, Reason: "invalid role"})
+			conn.Close()
+			return
+		}
 	}
 	name, role := res.Name, res.Role
 

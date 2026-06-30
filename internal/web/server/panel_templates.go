@@ -21,10 +21,11 @@ import (
 // capability ("permission = widget") — the template shows a section/nav item
 // only when its key is allowed. Active is the section key shown first.
 type panelView struct {
-	Vault     string
-	Host      string
-	MaskedKey string
-	Banner    string // ?msg= round-trip banner (redirect results)
+	Vault    string
+	Host     string
+	Selected string        // active vaultID (the rail plate text + ?vault= state)
+	Switcher []vaultOption // vaults the SWA can switch to; empty → render no switcher
+	Banner   string        // ?msg= round-trip banner (redirect results)
 
 	// BasePath + the two chains let panel.html link the active theme in its own
 	// <head>: one theme.css <link> per CSSChain layer, one panel.css <link> per
@@ -64,6 +65,14 @@ type panelKeys struct {
 type panelVaults struct {
 	Rows []gateway.VaultInfo
 	Err  string
+}
+
+// vaultOption is one entry in the rail's vault switcher. Selected marks the
+// vault the panel is currently scoped to. The list is the operator vault list
+// (server-gated on server-wide admin), reused from the Vaults section's fetch.
+type vaultOption struct {
+	ID       string
+	Selected bool
 }
 
 // secretOnceTmpl is the one-time-secret interstitial shown after minting a key

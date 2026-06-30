@@ -105,60 +105,98 @@ func renderPanel(deps *PageDeps, w http.ResponseWriter, r *http.Request, secs []
 	for _, s := range secs {
 		allowed[s.Key] = true
 	}
+
+	// One operator-vault-list fetch, reused for the switcher, the Vaults
+	// section, and cross-vault path resolution. Server-gated on server-wide
+	// admin; a non-SWA caller gets an error (→ no switcher, mounted vault only).
+	var vaultRows []gateway.VaultInfo
+	var vaultErr error
+	if allowed["vaults"] {
+		vaultRows, vaultErr = deps.Gateway.VaultsList(key)
+	}
+
+	selVaultID, selRoot := resolveSelected(deps, r, vaultRows)
+
+	plate := selVaultID
+	if plate == "" {
+		plate = deps.Vault.Name() // vault declares no vault_id → fall back to mount name
+	}
+
 	view := panelView{
-		Vault:         deps.Vault.Name(),
+		Vault:         plate,
+		Selected:      selVaultID,
 		Host:          deps.Gateway.Host(),
-		MaskedKey:     maskKey(key),
 		Banner:        r.URL.Query().Get("msg"),
 		BasePath:      deps.vaultInfo().BasePath(),
 		CSSChain:      deps.CSSChain,
 		PanelCSSChain: deps.PanelCSSChain,
-		Action:        panelActionPath(deps),
+		Action:        actionFor(deps, selVaultID),
 		Active:        secs[0].Key,
 		Allowed:       allowed,
 		RoleOptions:   builtinRoles,
+		Switcher:      switcherFor(vaultRows, selVaultID),
 	}
+
+	// Effective-config dump is the MOUNTED vault's resolved config; only show it
+	// when not switched away (deps.Defaults describes deps.Vault, not selRoot).
+	mounted := selVaultID == deps.VaultID
 	if allowed["webyaml"] {
-		view.WebYAML = buildConfigData(deps, "webyaml")
+		view.WebYAML = buildConfigData(deps, selRoot, "webyaml", mounted)
 	}
 	if allowed["webignore"] {
-		view.WebIgnore = buildConfigData(deps, "webignore")
+		view.WebIgnore = buildConfigData(deps, selRoot, "webignore", mounted)
 	}
 	if allowed["roles"] {
-		view.Roles = buildConfigData(deps, "roles")
+		view.Roles = buildConfigData(deps, selRoot, "roles", mounted)
 	}
 	if allowed["keys"] {
-		view.Keys = buildKeysData(deps, key)
+		view.Keys = buildKeysData(deps, selVaultID, key)
 	}
 	if allowed["vaults"] {
-		view.Vaults = buildVaultsData(deps, key)
+		view.Vaults = panelVaults{Rows: vaultRows, Err: errString(vaultErr)}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = deps.Templates.Panel.ExecuteTemplate(w, "panel.html", view)
 }
 
-// maskKey renders a cleartext ley_ token as a short, non-recoverable label for
-// the rail footer (first 8 + ellipsis + last 4). Display only — never used for
-// auth; short/unexpected values pass through unchanged.
-func maskKey(k string) string {
-	if len(k) <= 14 {
-		return k
+// switcherFor turns the operator vault list into switcher options, marking the
+// active vault. nil rows (non-SWA / unavailable) → nil → the template renders no
+// switcher.
+func switcherFor(rows []gateway.VaultInfo, selVaultID string) []vaultOption {
+	if len(rows) == 0 {
+		return nil
 	}
-	return k[:8] + "…" + k[len(k)-4:]
+	out := make([]vaultOption, 0, len(rows))
+	for _, v := range rows {
+		out = append(out, vaultOption{ID: v.ID, Selected: v.ID == selVaultID})
+	}
+	return out
 }
 
-// buildConfigData reads one vaultconfig file's editor data. For web.yaml it
-// also dumps the fully-resolved effective config (defaults + theme + overrides)
-// as a read-only reference. A read error surfaces as Err; a missing file is a
-// true create (empty Content).
-func buildConfigData(deps *PageDeps, sectionKey string) panelConfig {
+// errString is "" for a nil error, else err.Error().
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// buildConfigData reads one vaultconfig file's editor data from root's
+// .leyline/vaultconfig/. includeEffective adds the fully-resolved effective
+// config (web.yaml only) — pass false when scoped to a vault other than the
+// mounted one, since deps.Defaults describes only the mounted vault. A read
+// error surfaces as Err; a missing file is a true create (empty Content).
+func buildConfigData(deps *PageDeps, root, sectionKey string, includeEffective bool) panelConfig {
 	rel, _ := configRelPath(sectionKey)
-	content, _, err := readConfigFile(deps.Vault.Root, rel)
+	content, _, err := readConfigFile(root, rel)
 	pc := panelConfig{Content: string(content)}
 	if err != nil {
 		pc.Err = "read error: " + err.Error()
 	}
-	if sectionKey == "webyaml" {
+	if sectionKey == "webignore" {
+		pc.Content = scaffoldWebignore(pc.Content)
+	}
+	if sectionKey == "webyaml" && includeEffective {
 		if out, mErr := yaml.Marshal(deps.Defaults); mErr == nil {
 			pc.Effective = string(out)
 		}
@@ -175,6 +213,36 @@ func panelActionPath(deps *PageDeps) string {
 	return deps.Vault.Prefix + "/_panel"
 }
 
+// resolveSelected resolves the panel's target vault from the optional ?vault=
+// query param against the operator vault list. Absent, equal to the mounted
+// vault, unknown, or rows==nil (non-SWA / list unavailable) → the mounted vault
+// (deps.VaultID, deps.Vault.Root) — the unchanged single-vault path. A known
+// other vault → its id + on-disk Path (the co-located-disk assumption, §B): web
+// reads that vault's vaultconfig directly off the shared filesystem.
+func resolveSelected(deps *PageDeps, r *http.Request, rows []gateway.VaultInfo) (vaultID, root string) {
+	want := r.URL.Query().Get("vault")
+	if want == "" || want == deps.VaultID {
+		return deps.VaultID, deps.Vault.Root
+	}
+	for _, v := range rows {
+		if v.ID == want {
+			return v.ID, v.Path
+		}
+	}
+	return deps.VaultID, deps.Vault.Root
+}
+
+// actionFor is the panel POST target for vaultID: the mount path, plus
+// ?vault=<id> when targeting a vault other than the mounted one, so the POST and
+// the redirect that follows stay scoped to the selected vault.
+func actionFor(deps *PageDeps, vaultID string) string {
+	base := panelActionPath(deps)
+	if vaultID != "" && vaultID != deps.VaultID {
+		return base + "?vault=" + url.QueryEscape(vaultID)
+	}
+	return base
+}
+
 func handlePanelPost(deps *PageDeps, w http.ResponseWriter, r *http.Request, cs caps.Set) {
 	key, _, ok := panelAuth(deps, r)
 	if !ok {
@@ -186,13 +254,20 @@ func handlePanelPost(deps *PageDeps, w http.ResponseWriter, r *http.Request, cs 
 		return
 	}
 	section := r.FormValue("section")
-
-	// Re-check the cap for this section before relaying (defense in depth; the
-	// server re-enforces vault.admin on vaultconfig writes regardless).
 	if !sectionAllowed(cs, section) {
 		http.NotFound(w, r)
 		return
 	}
+
+	// Cross-vault target rides in ?vault= (the form Action carried it). VaultsList
+	// is server-gated on SWA; a non-SWA caller gets nil rows → mounted vault, and
+	// any forged cross-vault op is server-rejected regardless. Vaults ops are
+	// server-wide and take their target id from the form, so they ignore selVaultID.
+	var rows []gateway.VaultInfo
+	if r.URL.Query().Get("vault") != "" {
+		rows, _ = deps.Gateway.VaultsList(key)
+	}
+	selVaultID, selRoot := resolveSelected(deps, r, rows)
 
 	if rel, isCfg := configRelPath(section); isCfg {
 		newContent := []byte(r.FormValue("content"))
@@ -200,12 +275,12 @@ func handlePanelPost(deps *PageDeps, w http.ResponseWriter, r *http.Request, cs 
 			redirectPanel(deps, w, r, "invalid "+section+": "+vErr.Error())
 			return
 		}
-		_, preHash, rErr := readConfigFile(deps.Vault.Root, rel)
+		_, preHash, rErr := readConfigFile(selRoot, rel)
 		if rErr != nil {
 			redirectPanel(deps, w, r, "read error: "+rErr.Error())
 			return
 		}
-		ack, pErr := deps.Gateway.PushFile(r.Context(), deps.VaultID, key, rel, newContent, preHash)
+		ack, pErr := deps.Gateway.PushFile(r.Context(), selVaultID, key, rel, newContent, preHash)
 		if pErr != nil {
 			redirectPanel(deps, w, r, "save failed: "+pErr.Error())
 			return
@@ -223,9 +298,9 @@ func handlePanelPost(deps *PageDeps, w http.ResponseWriter, r *http.Request, cs 
 
 	switch section {
 	case "keys":
-		handleKeysPost(deps, w, r, key) // Task 11
+		handleKeysPost(deps, w, r, selVaultID, key)
 	case "vaults":
-		handleVaultsPost(deps, w, r, key) // Task 12
+		handleVaultsPost(deps, w, r, key)
 	default:
 		http.Error(w, "unknown section", http.StatusBadRequest)
 	}
@@ -259,16 +334,26 @@ func validateConfig(section string, content []byte) error {
 
 // renderSecretOnce shows a one-time secret (new key / vault admin key) in the
 // response body instead of a redirect, keeping it out of the URL, the access
-// log, and the Referer header. no-store stops it being cached to disk. See
+// log, and the Referer header. no-store stops it being cached to disk. The
+// "Back to panel" link preserves the selected vault (?vault=). See
 // handleKeysPost / handleVaultsPost create.
-func renderSecretOnce(deps *PageDeps, w http.ResponseWriter, message string) {
+func renderSecretOnce(deps *PageDeps, w http.ResponseWriter, r *http.Request, message string) {
+	back := panelActionPath(deps)
+	if v := r.URL.Query().Get("vault"); v != "" {
+		back += "?vault=" + url.QueryEscape(v)
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = secretOnceTmpl.Execute(w, secretOnceView{Message: message, Back: panelActionPath(deps)})
+	_ = secretOnceTmpl.Execute(w, secretOnceView{Message: message, Back: back})
 }
 
 func redirectPanel(deps *PageDeps, w http.ResponseWriter, r *http.Request, msg string) {
-	http.Redirect(w, r, panelActionPath(deps)+"?msg="+url.QueryEscape(msg), http.StatusSeeOther)
+	q := url.Values{}
+	if v := r.URL.Query().Get("vault"); v != "" {
+		q.Set("vault", v)
+	}
+	q.Set("msg", msg)
+	http.Redirect(w, r, panelActionPath(deps)+"?"+q.Encode(), http.StatusSeeOther)
 }
 
 // builtinRoles are the role names offered in the keys-section <select>. v1
@@ -277,36 +362,37 @@ func redirectPanel(deps *PageDeps, w http.ResponseWriter, r *http.Request, msg s
 // selection is the frontend-design phase.
 var builtinRoles = []string{"admin", "editor", "reader"}
 
-func buildKeysData(deps *PageDeps, key string) panelKeys {
-	rows, err := deps.Gateway.KeysList(deps.VaultID, key)
+func buildKeysData(deps *PageDeps, vaultID, key string) panelKeys {
+	rows, err := deps.Gateway.KeysList(vaultID, key)
 	if err != nil {
 		return panelKeys{Err: err.Error()}
 	}
 	return panelKeys{Rows: rows}
 }
 
-// handleKeysPost relays a key mutation to the server as the user. The cleartext
-// of a freshly created key is surfaced once via the redirect banner — the
-// server never returns it again.
-func handleKeysPost(deps *PageDeps, w http.ResponseWriter, r *http.Request, key string) {
+// handleKeysPost relays a key mutation to the server as the user, targeting
+// vaultID (the selected vault, which may differ from the mounted one). The
+// cleartext of a freshly created key is surfaced once — the server never
+// returns it again.
+func handleKeysPost(deps *PageDeps, w http.ResponseWriter, r *http.Request, vaultID, key string) {
 	switch r.FormValue("op") {
 	case "create":
-		created, err := deps.Gateway.KeysCreate(deps.VaultID, key, r.FormValue("name"), r.FormValue("role"))
+		created, err := deps.Gateway.KeysCreate(vaultID, key, r.FormValue("name"), r.FormValue("role"))
 		if err != nil {
 			redirectPanel(deps, w, r, "create failed: "+err.Error())
 			return
 		}
-		renderSecretOnce(deps, w, "New key for "+created.Name+": "+created.Key+" — copy it now, it is shown only once.")
+		renderSecretOnce(deps, w, r, "New key for "+created.Name+": "+created.Key+" — copy it now, it is shown only once.")
 	case "revoke":
 		name := r.FormValue("name")
-		if err := deps.Gateway.KeysDelete(deps.VaultID, key, name); err != nil {
+		if err := deps.Gateway.KeysDelete(vaultID, key, name); err != nil {
 			redirectPanel(deps, w, r, "revoke failed: "+err.Error())
 			return
 		}
 		redirectPanel(deps, w, r, "revoked "+name)
 	case "role":
 		name := r.FormValue("name")
-		if err := deps.Gateway.KeysUpdateRole(deps.VaultID, key, name, r.FormValue("role")); err != nil {
+		if err := deps.Gateway.KeysUpdateRole(vaultID, key, name, r.FormValue("role")); err != nil {
 			redirectPanel(deps, w, r, "role change failed: "+err.Error())
 			return
 		}
@@ -314,14 +400,6 @@ func handleKeysPost(deps *PageDeps, w http.ResponseWriter, r *http.Request, key 
 	default:
 		http.Error(w, "unknown op", http.StatusBadRequest)
 	}
-}
-
-func buildVaultsData(deps *PageDeps, key string) panelVaults {
-	rows, err := deps.Gateway.VaultsList(key)
-	if err != nil {
-		return panelVaults{Err: err.Error()}
-	}
-	return panelVaults{Rows: rows}
 }
 
 // handleVaultsPost relays a cross-vault operation. The server enforces
@@ -341,7 +419,7 @@ func handleVaultsPost(deps *PageDeps, w http.ResponseWriter, r *http.Request, ke
 			redirectPanel(deps, w, r, "vault create failed: "+err.Error())
 			return
 		}
-		renderSecretOnce(deps, w, "Vault "+created.ID+" created. Admin key: "+created.AdminKey+" — copy it now, it is shown only once.")
+		renderSecretOnce(deps, w, r, "Vault "+created.ID+" created. Admin key: "+created.AdminKey+" — copy it now, it is shown only once.")
 	case "destroy":
 		id := r.FormValue("id")
 		if err := deps.Gateway.VaultDestroy(id, key); err != nil {

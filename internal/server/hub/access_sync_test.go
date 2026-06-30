@@ -78,6 +78,32 @@ func TestHydrateBackfillsAccessFile(t *testing.T) {
 	}
 }
 
+// TestAuthorizeServerWide_CrossVault: the decision the WS handleConn fallback
+// relies on — an admin key in a server_wide_admins vault authorizes server-wide,
+// while an admin of an ordinary vault does not. The WS cross-vault push that
+// consumes this is exercised end-to-end in Task 8 (the single-vault WS harness
+// here cannot drive it).
+func TestAuthorizeServerWide_CrossVault(t *testing.T) {
+	h, _, _ := newAdminTestHub(t)
+	opsRes, err := h.CreateVault(CreateVaultOpts{ID: "ops", ServerWideAdmins: true, AdminKeyName: "initial"})
+	if err != nil {
+		t.Fatalf("CreateVault ops: %v", err)
+	}
+	opsAdmin := opsRes.AdminKey
+	teamRes, err := h.CreateVault(CreateVaultOpts{ID: "team", AdminKeyName: "initial"})
+	if err != nil {
+		t.Fatalf("CreateVault team: %v", err)
+	}
+	teamAdmin := teamRes.AdminKey
+
+	if !h.AuthorizeServerWide(opsAdmin) {
+		t.Fatal("ops admin (SWA vault) not recognized as server-wide")
+	}
+	if h.AuthorizeServerWide(teamAdmin) {
+		t.Fatal("team admin (non-SWA vault) wrongly recognized as server-wide")
+	}
+}
+
 // TestHandlePushBatch_FiltersAccessFile covers §B: an inbound client push of
 // .leyline/vaultconfig/access comes back as a recoverable PushAckFiltered (not
 // a hard error), nothing in the batch is staged, and a follow-up push of the

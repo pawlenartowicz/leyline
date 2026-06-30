@@ -11,6 +11,7 @@ import (
 
 	"github.com/pawlenartowicz/leyline/internal/web/auth"
 	"github.com/pawlenartowicz/leyline/internal/web/gateway"
+	"github.com/pawlenartowicz/leyline/internal/web/vault"
 	"github.com/pawlenartowicz/leyline/protocol"
 	"github.com/pawlenartowicz/leyline/protocol/access"
 	"github.com/pawlenartowicz/leyline/protocol/caps"
@@ -197,5 +198,62 @@ func TestPanelGETUnpaired404(t *testing.T) {
 
 	if rec := panelGet(t, deps, adminTok); rec.Code != http.StatusNotFound {
 		t.Errorf("unpaired admin: got %d, want 404", rec.Code)
+	}
+}
+
+func TestResolveSelected(t *testing.T) {
+	deps := &PageDeps{Vault: vault.Vault{Prefix: "/", Root: "/srv/v1"}, VaultID: "v1"}
+	rows := []gateway.VaultInfo{
+		{ID: "v1", Path: "/srv/v1"},
+		{ID: "v2", Path: "/srv/v2"},
+	}
+	mk := func(q string) *http.Request { return httptest.NewRequest("GET", "/_panel"+q, nil) }
+
+	// Absent param → mounted vault unchanged.
+	if id, root := resolveSelected(deps, mk(""), rows); id != "v1" || root != "/srv/v1" {
+		t.Errorf("absent: (%q,%q), want (v1,/srv/v1)", id, root)
+	}
+	// Param == mounted → mounted vault.
+	if id, root := resolveSelected(deps, mk("?vault=v1"), rows); id != "v1" || root != "/srv/v1" {
+		t.Errorf("self: (%q,%q), want (v1,/srv/v1)", id, root)
+	}
+	// Param == another known vault → that vault's path.
+	if id, root := resolveSelected(deps, mk("?vault=v2"), rows); id != "v2" || root != "/srv/v2" {
+		t.Errorf("switch: (%q,%q), want (v2,/srv/v2)", id, root)
+	}
+	// Unknown vault → falls back to mounted.
+	if id, root := resolveSelected(deps, mk("?vault=nope"), rows); id != "v1" || root != "/srv/v1" {
+		t.Errorf("unknown: (%q,%q), want (v1,/srv/v1)", id, root)
+	}
+	// No rows (non-SWA / list unavailable) → mounted, even with a param.
+	if id, root := resolveSelected(deps, mk("?vault=v2"), nil); id != "v1" || root != "/srv/v1" {
+		t.Errorf("no rows: (%q,%q), want (v1,/srv/v1)", id, root)
+	}
+}
+
+func TestActionFor(t *testing.T) {
+	deps := &PageDeps{Vault: vault.Vault{Prefix: "/"}, VaultID: "v1"}
+	if got := actionFor(deps, "v1"); got != "/_panel" {
+		t.Errorf("mounted action = %q, want /_panel", got)
+	}
+	if got := actionFor(deps, "v2"); got != "/_panel?vault=v2" {
+		t.Errorf("cross action = %q, want /_panel?vault=v2", got)
+	}
+}
+
+func TestPanelPlateShowsVaultID(t *testing.T) {
+	vaultDir, adminTok, _ := makePanelVault(t)
+	stores := auth.NewStores([]auth.VaultSpec{{Prefix: "/", VaultDir: vaultDir}})
+	sessions := &authSessionsAdapter{stores: stores}
+	deps := setupAuthFixture(t, vaultDir, stores, sessions, "view")
+	deps.Gateway = gateway.New("notes.example.com", false)
+	deps.VaultID = "personal-site"
+
+	rec := panelGet(t, deps, adminTok)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin: got %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "personal-site") {
+		t.Errorf("plate missing vaultID; body:\n%s", rec.Body.String())
 	}
 }

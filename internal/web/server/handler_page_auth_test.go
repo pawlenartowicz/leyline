@@ -80,6 +80,7 @@ func setupAuthFixture(t *testing.T, vaultDir string, stores *auth.Stores, sessio
 		// Stand-in for the real panel.html: renders cap-allowed sections from
 		// panelView so TestPanelGETGating can assert on the gated section ids.
 		"panel.html": `<!doctype html><html><body>` +
+			`<span class="vault-plate__name">{{.Vault}}</span>` +
 			`{{if .Allowed.webyaml}}<section id="webyaml"><textarea name="content">{{.WebYAML.Content}}</textarea></section>{{end}}` +
 			`{{if .Allowed.webignore}}<section id="webignore"><textarea name="content">{{.WebIgnore.Content}}</textarea></section>{{end}}` +
 			`{{if .Allowed.roles}}<section id="roles"><textarea name="content">{{.Roles.Content}}</textarea></section>{{end}}` +
