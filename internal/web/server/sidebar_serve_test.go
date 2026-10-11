@@ -161,3 +161,20 @@ func TestSidebar_VaultOverridesThemeLeft(t *testing.T) {
 		t.Errorf("vault left_sidebar:none did not override theme; got %s", truncate(body, 300))
 	}
 }
+
+// A .md widget is shown on every page and its file lives outside the content
+// tree, so a relative link in it resolves against the vault root even when
+// the widget name has a folder part.
+func TestSidebar_MarkdownWidgetLinksResolveAgainstVaultRoot(t *testing.T) {
+	root := buildSidebarVault(t,
+		"right_sidebar: [widgets/related.md]\n",
+		map[string]string{
+			"index.md": "# Home\n\nbody\n",
+			"guide.md": "# Guide\n\ntext\n",
+			".leyline/vaultconfig/widgets/related.md": "See the [guide](guide.md).\n",
+		})
+	body := getBody(t, serveSidebarVault(t, root), "/")
+	if !strings.Contains(body, `href="/guide.md"`) {
+		t.Errorf("widget link should resolve against the vault root; got %s", truncate(body, 2000))
+	}
+}

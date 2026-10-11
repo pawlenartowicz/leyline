@@ -314,3 +314,131 @@ func TestRenderMarkdown_TitleExtract_CodeSpan(t *testing.T) {
 		t.Errorf("extracted = %q, want \"Using dev_mode: true\"", extracted)
 	}
 }
+
+// Standard Markdown links and images resolve against the folder of the page
+// they are written on, the way GitHub renders them.
+func TestRenderMarkdown_RelativeDestResolvesAgainstPageFolder(t *testing.T) {
+	r := NewMarkdownRenderer(MarkdownOptions{})
+	nested := URLContext{VaultPrefix: "/plskit", SourcePath: "concepts/PLS1/index.md"}
+	cases := []struct {
+		name string
+		src  string
+		ctx  URLContext
+		want string
+	}{
+		{"sibling", "[x](find-k.md)", nested, `href="/plskit/concepts/PLS1/find-k.md"`},
+		{"parent folder", "[x](../PLS3/index.md)", nested, `href="/plskit/concepts/PLS3/index.md"`},
+		{"dot-dot above the vault root stops at it", "[x](../../../x.md)", nested, `href="/plskit/x.md"`},
+		{"fragment kept", "[x](find-k.md#how)", nested, `href="/plskit/concepts/PLS1/find-k.md#how"`},
+		{"query kept", "[x](find-k.md?a=1)", nested, `href="/plskit/concepts/PLS1/find-k.md?a=1"`},
+		{"trailing slash kept", "[x](sub/)", nested, `href="/plskit/concepts/PLS1/sub/"`},
+		{"image", "![d](img/plot.png)", nested, `src="/plskit/concepts/PLS1/img/plot.png"`},
+		{"standard-form sized image", "![d|300](img/plot.png)", nested, `src="/plskit/concepts/PLS1/img/plot.png"`},
+		{"scheme-like text in the query", "[x](go.md?u=https://example.com/a)", nested, `href="/plskit/concepts/PLS1/go.md?u=https://example.com/a"`},
+		{"tag selector", "[x](find-k.md)",
+			URLContext{VaultPrefix: "/plskit", SourcePath: "concepts/PLS1/index.md", Tag: "v1"},
+			`href="/plskit/@v1/concepts/PLS1/find-k.md"`},
+		{"vault mounted at /", "[x](find-k.md)",
+			URLContext{VaultPrefix: "/", SourcePath: "concepts/PLS1/index.md"},
+			`href="/concepts/PLS1/find-k.md"`},
+		{"folder with a space and non-ASCII", "[x](find-k.md)",
+			URLContext{VaultPrefix: "/plskit", SourcePath: "my notes/żółw/page.md"},
+			`href="/plskit/my%20notes/%C5%BC%C3%B3%C5%82w/find-k.md"`},
+		{"reference-style link", "[x][ref]\n\n[ref]: find-k.md", nested, `href="/plskit/concepts/PLS1/find-k.md"`},
+		{"author-encoded destination is not encoded twice", "[x](my%20file.md)", nested, `href="/plskit/concepts/PLS1/my%20file.md"`},
+		{"angle-bracket destination with a space", "[x](<my file.md>)", nested, `href="/plskit/concepts/PLS1/my%20file.md"`},
+		{"folder with # and %", "[x](find-k.md)",
+			URLContext{VaultPrefix: "/plskit", SourcePath: "c#d/100%/page.md"},
+			`href="/plskit/c%23d/100%25/find-k.md"`},
+		{"empty SourcePath resolves against the vault root", "[x](find-k.md)",
+			URLContext{VaultPrefix: "/plskit"},
+			`href="/plskit/find-k.md"`},
+		{"dot-slash on a root page", "[x](./x.md)",
+			URLContext{VaultPrefix: "/plskit", SourcePath: "today.md"},
+			`href="/plskit/x.md"`},
+		{"dot-dot on a root page stops at the vault root", "[x](../x.md)",
+			URLContext{VaultPrefix: "/plskit", SourcePath: "today.md"},
+			`href="/plskit/x.md"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, _, err := r.Render([]byte(c.src), c.ctx)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if !strings.Contains(got, c.want) {
+				t.Errorf("want %s in %q", c.want, got)
+			}
+		})
+	}
+}
+
+// Destinations that are not vault-relative paths pass through untouched on a
+// nested page: URI schemes, and the already-absolute URLs that the sized
+// image embed and cross-vault transformers emit.
+func TestRenderMarkdown_NestedPageLeavesNonRelativeDestAlone(t *testing.T) {
+	r := NewMarkdownRenderer(MarkdownOptions{WikilinkResolver: fakeResolver{"a.png": "/plskit/media/a.png"}})
+	ctx := URLContext{
+		VaultPrefix: "/plskit",
+		SourcePath:  "concepts/PLS1/index.md",
+		VaultID:     "plskit",
+		IDMap:       map[string]string{"plskit": "/plskit", "research": "/research"},
+	}
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"tel", "[call](tel:123)", `href="tel:123"`},
+		{"mailto", "[mail](mailto:a@example.com)", `href="mailto:a@example.com"`},
+		{"https", "[ext](https://example.com/a.md)", `href="https://example.com/a.md"`},
+		{"data image", "![d](data:image/png;base64,AAAA)", `src="data:image/png;base64,AAAA"`},
+		{"leading slash", "[abs](/absolute)", `href="/absolute"`},
+		{"same-page anchor", "[top](#top)", `href="#top"`},
+		{"sized image embed", "![[a.png|300]]", `src="/plskit/media/a.png"`},
+		{"cross-vault link", "[[@research/about]]", `href="/research/about"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, _, err := r.Render([]byte(c.src), ctx)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if !strings.Contains(got, c.want) {
+				t.Errorf("want %s in %q", c.want, got)
+			}
+		})
+	}
+}
+
+func TestRenderMarkdown_HeadingIDs(t *testing.T) {
+	cases := []struct {
+		name, src string
+		want      []string
+	}{
+		{"code span with underscore", "## `test_method=\"auto\"`", []string{`id="test_methodauto"`}},
+		{"underscore and parens", "## Bypassing the n_eff check (Rust only)", []string{`id="bypassing-the-n_eff-check-rust-only"`}},
+		{"emphasis markup", "## _Italic_ and **bold**", []string{`id="italic-and-bold"`}},
+		{"link label", "## See [the guide](guide.md) first", []string{`id="see-the-guide-first"`}},
+		{"non-ASCII letters", "## Żółw i Środowisko", []string{`id="żółw-i-środowisko"`}},
+		{"duplicates", "## Setup\n\n## Setup", []string{`id="setup"`, `id="setup-1"`}},
+		{"leading title counts", "# Setup\n\n## Setup", []string{`id="setup-1"`}},
+		{"empty result", "## ???", []string{`id="heading"`}},
+		{"setext", "Alpha Beta\n---", []string{`id="alpha-beta"`}},
+		{"block id kept", "## Title ^blk-1", []string{`id="^blk-1"`}},
+	}
+	r := NewMarkdownRenderer(MarkdownOptions{})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, _, err := r.Render([]byte(c.src), URLContext{VaultPrefix: "/", SourcePath: "note.md"})
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			for _, w := range c.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("missing %s in %q", w, got)
+				}
+			}
+		})
+	}
+}

@@ -37,8 +37,8 @@ func TestDetectPackageManager_NoneFound(t *testing.T) {
 }
 
 func TestAssetFileName(t *testing.T) {
-	got := assetFileName("leyline-server", "0.1.1", "amd64", "rpm")
-	if got != "leyline-server_0.1.1_amd64.rpm" {
+	got := assetFileName("leyline-server", "amd64", "rpm")
+	if got != "leyline-server_amd64.rpm" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -55,14 +55,14 @@ func TestNormalizeTagThenCompare(t *testing.T) {
 
 func TestPickAsset(t *testing.T) {
 	rel := ghRelease{Assets: []ghAsset{
-		{Name: "leyline-server_0.1.1_arm64.rpm", DownloadURL: "u-arm"},
-		{Name: "leyline-server_0.1.1_amd64.rpm", DownloadURL: "u-amd"},
+		{Name: "leyline-server_arm64.rpm", DownloadURL: "u-arm"},
+		{Name: "leyline-server_amd64.rpm", DownloadURL: "u-amd"},
 	}}
-	url, ok := pickAsset(rel, "leyline-server_0.1.1_amd64.rpm")
+	url, ok := pickAsset(rel, "leyline-server_amd64.rpm")
 	if !ok || url != "u-amd" {
 		t.Fatalf("got %q ok=%v", url, ok)
 	}
-	if _, ok := pickAsset(rel, "leyline-server_0.1.1_amd64.deb"); ok {
+	if _, ok := pickAsset(rel, "leyline-server_amd64.deb"); ok {
 		t.Fatal("expected miss for absent asset")
 	}
 }

@@ -72,8 +72,10 @@ type PageDeps struct {
 	WikilinkResolver render.WikilinkResolver
 	Logger           *slog.Logger
 
-	// VaultID is this vault's `vault_id` from web.yaml — used by the
-	// cross-vault transformer for the same-vault-collapse optimisation.
+	// VaultID is this vault's `vault_id` from web.yaml. The panel handler
+	// compares it against the requested vault to tell the mounted vault
+	// from another one, and page and sidebar renders pass it on as
+	// render.URLContext.VaultID.
 	// Empty when the vault declares no vault_id.
 	VaultID string
 	// IDMap is a snapshot of vault_id → mount prefix taken when this
@@ -298,6 +300,9 @@ func PageHandler(deps *PageDeps) http.Handler {
 		switch disp.Action {
 		case urlx.ActionRedirect:
 			redirectTo := buildRedirectWithTag(deps.Vault.Prefix, rawTag, disp.Redirect)
+			if r.URL.RawQuery != "" {
+				redirectTo += "?" + r.URL.RawQuery
+			}
 			http.Redirect(w, r, redirectTo, http.StatusFound)
 			return
 		case urlx.ActionNotFound:
@@ -380,6 +385,7 @@ func PageHandler(deps *PageDeps) http.Handler {
 		key := cache.Key{
 			Epoch: deps.Epoch.Get(),
 			Vault: deps.Vault.Name(),
+			Path:  disp.RelPath,
 			Hash:  hash,
 			Mode:  string(editMode),
 			Tag:   rawTag,

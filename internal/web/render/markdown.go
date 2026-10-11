@@ -3,7 +3,10 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"path"
+	"regexp"
 	"strings"
+	"unicode"
 
 	obsidian "github.com/powerman/goldmark-obsidian"
 	"github.com/yuin/goldmark"
@@ -47,10 +50,9 @@ type MarkdownOptions struct {
 }
 
 // URLContext is supplied per-render so the wikilink resolver can build absolute
-// URLs from the vault prefix and source-file location. VaultID + IDMap power
-// the cross-vault `[[@vault/path]]` rewriter; both are optional and absent
-// values disable cross-vault rewriting (the wikilink falls through to its
-// normal unresolved-text rendering).
+// URLs from the vault prefix and source-file location. IDMap powers the
+// cross-vault `[[@vault/path]]` rewriter; with an empty IDMap every such
+// wikilink renders as an unresolved `leyline-cross-vault is-unresolved` span.
 //
 // Tag holds the active version selector parsed from the URL's `@<tag>`
 // segment (bare tag name; `"head"` for the explicit filesystem selector;
@@ -135,9 +137,12 @@ func NewMarkdownRenderer(opts MarkdownOptions) *MarkdownRenderer {
 			SyntaxHighlighting(),
 		),
 		goldmark.WithParserOptions(
-			parser.WithAutoHeadingID(),
 			parser.WithASTTransformers(
-				// titleExtractTransformer runs first so callouts/vault-prefix
+				// headingIDTransformer runs before titleExtractTransformer so the
+				// leading H1 that becomes the page title still takes part in
+				// duplicate numbering, as on GitHub.
+				util.Prioritized(headingIDTransformer{}, 50),
+				// titleExtractTransformer runs next so callouts/vault-prefix
 				// rewriters don't see the H1 that's being promoted to .Title.
 				util.Prioritized(titleExtractTransformer{}, 100),
 				util.Prioritized(calloutTransformer{}, 500),
@@ -198,6 +203,59 @@ func (r *MarkdownRenderer) Render(body []byte, urlCtx URLContext) (string, strin
 	return buf.String(), extracted, nil
 }
 
+// headingIDTransformer sets the `id` attribute on every heading using
+// GitHub's anchor rule (html-pipeline TableOfContentsFilter), so anchors
+// written for GitHub land on the same heading. Repeated IDs within a document
+// get -1, -2, ... appended. A heading that already carries an `id` (an
+// Obsidian block ID) keeps it, and that ID counts as used.
+type headingIDTransformer struct{}
+
+func (headingIDTransformer) Transform(doc *ast.Document, reader text.Reader, _ parser.Context) {
+	used := map[string]bool{}
+	next := map[string]int{}
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		h, ok := n.(*ast.Heading)
+		if !ok || !entering {
+			return ast.WalkContinue, nil
+		}
+		if existing, ok := h.AttributeString("id"); ok {
+			if b, ok := existing.([]byte); ok && len(b) > 0 {
+				used[string(b)] = true
+				return ast.WalkSkipChildren, nil
+			}
+		}
+		base := githubSlug(string(inlineText(reader.Source(), h)))
+		id := base
+		for used[id] {
+			next[base]++
+			id = fmt.Sprintf("%s-%d", base, next[base])
+		}
+		used[id] = true
+		h.SetAttributeString("id", []byte(id))
+		return ast.WalkSkipChildren, nil
+	})
+}
+
+// githubSlug lowercases s, drops every character that is not a letter, mark,
+// decimal digit, connector punctuation, '-' or space, and turns spaces into
+// '-'. An empty result becomes "heading".
+func githubSlug(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r == ' ':
+			b.WriteByte('-')
+		case r == '-', unicode.IsLetter(r), unicode.IsMark(r),
+			unicode.Is(unicode.Nd, r), unicode.Is(unicode.Pc, r):
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "heading"
+	}
+	return b.String()
+}
+
 // titleExtractTransformer promotes a leading H1 to a "page title" stored in the
 // parser context, and removes that H1 from the AST so the rendered HTML doesn't
 // duplicate the title the template already renders from .Title. Only triggers
@@ -243,10 +301,11 @@ func inlineText(src []byte, n ast.Node) []byte {
 	return buf.Bytes()
 }
 
-// vaultPrefixTransformer prepends the vault mount prefix (and active `@<tag>`
-// selector) to every relative link and image destination in the AST. Runs
-// last (priority 999) so all prior transformers have already finalized their
-// destinations; absolute URLs (http://, /, #…) and mailto: are skipped.
+// vaultPrefixTransformer resolves every relative link and image destination
+// in the AST against the folder of the page it is written on, then prepends
+// the vault mount prefix (and active `@<tag>` selector). Runs last (priority
+// 999) so all prior transformers have already finalized their destinations;
+// destinations starting with `/`, `#` or a URI scheme are skipped.
 type vaultPrefixTransformer struct{}
 
 func (vaultPrefixTransformer) Transform(doc *ast.Document, _ text.Reader, pCtx parser.Context) {
@@ -259,15 +318,16 @@ func (vaultPrefixTransformer) Transform(doc *ast.Document, _ text.Reader, pCtx p
 		return
 	}
 	prefix := buildLinkPrefix(urlCtx)
+	dir := escapeSegments(path.Dir(urlCtx.SourcePath))
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
 		}
 		switch v := n.(type) {
 		case *ast.Link:
-			v.Destination = rewriteDest(v.Destination, prefix)
+			v.Destination = rewriteDest(v.Destination, prefix, dir)
 		case *ast.Image:
-			v.Destination = rewriteDest(v.Destination, prefix)
+			v.Destination = rewriteDest(v.Destination, prefix, dir)
 		}
 		return ast.WalkContinue, nil
 	})
@@ -302,13 +362,32 @@ func buildLinkPrefix(u URLContext) string {
 	return strings.TrimSuffix(prefix, "/") + versionSeg + "/"
 }
 
-func rewriteDest(dest []byte, prefix string) []byte {
+// uriSchemeRE matches a leading URI scheme (RFC 3986 §3.1), e.g. `https:`,
+// `mailto:`, `tel:`, `data:`.
+var uriSchemeRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
+
+// rewriteDest resolves a relative destination against dir and prepends
+// prefix. dir is the page's folder: vault-relative, percent-encoded, "." for
+// a page at the vault root. The author's destination is kept as written
+// apart from the `.` / `..` cleanup; its `?query` / `#fragment` tail is
+// carried over untouched.
+func rewriteDest(dest []byte, prefix, dir string) []byte {
 	if len(dest) == 0 {
 		return dest
 	}
 	s := string(dest)
-	if s[0] == '/' || s[0] == '#' || strings.Contains(s, "://") || strings.HasPrefix(s, "mailto:") {
+	if s[0] == '/' || s[0] == '#' || uriSchemeRE.MatchString(s) {
 		return dest
 	}
-	return []byte(prefix + s)
+	rel, tail := s, ""
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		rel, tail = s[:i], s[i:]
+	}
+	// path.Join cleans its result, and under the leading "/" a `..` that
+	// climbs above the vault root stops there — what a browser does with a URL.
+	joined := strings.TrimPrefix(path.Join("/", dir, rel), "/")
+	if strings.HasSuffix(rel, "/") && joined != "" {
+		joined += "/"
+	}
+	return []byte(prefix + joined + tail)
 }

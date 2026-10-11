@@ -163,6 +163,45 @@ func TestPageHandler_PrettyRedirect(t *testing.T) {
 	}
 }
 
+func TestPageHandler_PrettyRedirectKeepsQuery(t *testing.T) {
+	f := setupFixture(t)
+	deps := &PageDeps{
+		Vault:      f.vault,
+		Matcher:    f.matcher,
+		Dispatch:   f.dispatch,
+		Themes:     f.themes,
+		ActiveName: "_base",
+		Templates:  f.tpl,
+		Cache:      f.cache,
+		Epoch:      f.epoch,
+		Markdown:   render.NewMarkdownRenderer(render.MarkdownOptions{}),
+		Logger:     slog.Default(),
+	}
+	h := PageHandler(deps)
+
+	cases := []struct {
+		url, wantSuffix string
+		wantQuery       bool
+	}{
+		{"/note.md?mode=edit", "/note?mode=edit", true},
+		{"/note.md", "/note", false},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", tc.url, nil))
+		if rec.Code != http.StatusFound {
+			t.Fatalf("%s: status = %d, want 302", tc.url, rec.Code)
+		}
+		loc := rec.Header().Get("Location")
+		if !strings.HasSuffix(loc, tc.wantSuffix) {
+			t.Errorf("%s: Location = %q, want suffix %q", tc.url, loc, tc.wantSuffix)
+		}
+		if !tc.wantQuery && strings.Contains(loc, "?") {
+			t.Errorf("%s: Location = %q, want no query", tc.url, loc)
+		}
+	}
+}
+
 func TestPageHandler_404OnUnknown(t *testing.T) {
 	f := setupFixture(t)
 	deps := &PageDeps{
@@ -383,5 +422,22 @@ func TestBrandRendering(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Two pages with identical bytes in different folders must not share a cached
+// render: each page's relative links resolve against its own folder.
+func TestPageHandler_CacheKeepsIdenticalFilesInDifferentFoldersApart(t *testing.T) {
+	root := buildSidebarVault(t, "", map[string]string{
+		"index.md":  "# Home\n\nbody\n",
+		"a/page.md": "[x](t.md)\n",
+		"b/page.md": "[x](t.md)\n",
+	})
+	ts := serveSidebarVault(t, root)
+	for _, dir := range []string{"a", "b"} {
+		body := getBody(t, ts, "/"+dir+"/page")
+		if want := `href="/` + dir + `/t.md"`; !strings.Contains(body, want) {
+			t.Errorf("GET /%s/page: want %s in body", dir, want)
+		}
 	}
 }

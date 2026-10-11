@@ -100,18 +100,29 @@ func TestCrossVault_UnknownVaultProducesUnresolvedSpan(t *testing.T) {
 	}
 }
 
-func TestCrossVault_SameVaultCollapsesPrefix(t *testing.T) {
-	out := renderCV(t,
-		"[[@personal-site/about]]",
-		"/", "personal-site",
-		map[string]string{"personal-site": "/", "research": "/research"},
-	)
-	// Same-vault collapse → href has no prefix component.
-	if !strings.Contains(out, `href="/about"`) {
-		t.Errorf("collapsed href missing: %s", out)
+func TestCrossVault_SameVaultUsesMountPrefix(t *testing.T) {
+	// A link to the current vault resolves through IDMap like any other
+	// vault, so a vault mounted at /notes keeps /notes in the href and a
+	// vault mounted at / yields a root-relative href.
+	cases := []struct {
+		name, body, prefix, id, want string
+		idMap                        map[string]string
+	}{
+		{"mounted at /notes", "[[@notes/about]]", "/notes", "notes", `href="/notes/about"`,
+			map[string]string{"notes": "/notes"}},
+		{"mounted at /", "[[@personal-site/about]]", "/", "personal-site", `href="/about"`,
+			map[string]string{"personal-site": "/", "research": "/research"}},
 	}
-	if strings.Contains(out, `is-unresolved`) {
-		t.Errorf("should not be unresolved: %s", out)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := renderCV(t, tc.body, tc.prefix, tc.id, tc.idMap)
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("want %s in: %s", tc.want, out)
+			}
+			if strings.Contains(out, `is-unresolved`) {
+				t.Errorf("should not be unresolved: %s", out)
+			}
+		})
 	}
 }
 

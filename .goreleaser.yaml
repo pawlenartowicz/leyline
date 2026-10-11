@@ -46,21 +46,24 @@ builds:
       - -s -w -X github.com/pawlenartowicz/leyline/internal/buildinfo.Value={{ .Version }}
 
 archives:
-  # One archive per release component. Names are pinned to the pre-consolidation
-  # filenames (project_name is now `leyline` for all builds, so the prefix can't
-  # come from .ProjectName) — `leyline-admin update` and curl URLs match by exact
-  # asset name. The server archive carries both server-box binaries.
+  # One archive per release component. Names omit the version on purpose: the
+  # version lives in the release tag (URL path), not the filename, so the
+  # GitHub `releases/latest/download/<name>` URL is permanently stable and the
+  # install docs never need bumping. `leyline-admin update` and the curl URLs
+  # match by this exact versionless name. (project_name is `leyline` for all
+  # builds, so the prefix can't come from .ProjectName.) The server archive
+  # carries both server-box binaries.
   - id: leyline
     ids: [leyline]
-    name_template: 'leyline_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    name_template: 'leyline_{{ .Os }}_{{ .Arch }}'
     formats: [tar.gz]
   - id: leyline-server
     ids: [leyline-server, leyline-admin]
-    name_template: 'leyline-server_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    name_template: 'leyline-server_{{ .Os }}_{{ .Arch }}'
     formats: [tar.gz]
   - id: leyline-web
     ids: [leyline-web]
-    name_template: 'leyline-web_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    name_template: 'leyline-web_{{ .Os }}_{{ .Arch }}'
     formats: [tar.gz]
 
 checksum:
@@ -72,7 +75,7 @@ release:
 nfpms:
   - id: leyline-server
     package_name: leyline-server
-    file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Arch }}'
+    file_name_template: '{{ .PackageName }}_{{ .Arch }}'
     ids: [leyline-server, leyline-admin]
     vendor: pawlenartowicz
     homepage: https://github.com/pawlenartowicz/leyline
@@ -108,9 +111,10 @@ nfpms:
         postupgrade: packaging/server/scripts/postupgrade.sh
   - id: leyline-web
     package_name: leyline-web
-    # Pin the filename so the curl URLs and `leyline-admin update` asset lookup
-    # match exactly. Default nfpm naming yields x86_64 + an extra _linux_ segment.
-    file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Arch }}'
+    # Versionless filename (no .Version) so `releases/latest/download/<name>`
+    # stays stable and `leyline-admin update`'s asset lookup matches; this also
+    # overrides default nfpm naming, which yields x86_64 + an extra _linux_ segment.
+    file_name_template: '{{ .PackageName }}_{{ .Arch }}'
     ids: [leyline-web]
     vendor: pawlenartowicz
     homepage: https://github.com/pawlenartowicz/leyline

@@ -42,11 +42,11 @@ func (n *crossVaultUnresolvedNode) Dump(src []byte, level int) {
 // node. Malformed `@`-targets (regex miss) are left alone — the wikilink
 // renderer falls through to its plain-text path, making the typo visible.
 //
-// The transformer reads the active `VaultID` and `IDMap` from URLContext.
-// When IDMap is empty or VaultID is unset, every `@`-wikilink turns into
-// an unresolved span (or is left alone if no IDMap), which is the
-// expected behaviour for vaults that haven't been wired into the
-// operator's idMap yet.
+// The transformer reads `IDMap` from URLContext. Every vault, the current
+// one included, resolves to its mount prefix there. When IDMap is empty,
+// every `@`-wikilink turns into an unresolved span, which is the expected
+// behaviour for vaults that haven't been wired into the operator's idMap
+// yet.
 type crossVaultTransformer struct{}
 
 func (crossVaultTransformer) Transform(doc *ast.Document, _ text.Reader, pCtx parser.Context) {
@@ -59,7 +59,6 @@ func (crossVaultTransformer) Transform(doc *ast.Document, _ text.Reader, pCtx pa
 		return
 	}
 	idMap := urlCtx.IDMap
-	currentVault := urlCtx.VaultID
 
 	type replacement struct {
 		parent ast.Node
@@ -106,11 +105,6 @@ func (crossVaultTransformer) Transform(doc *ast.Document, _ text.Reader, pCtx pa
 			return ast.WalkSkipChildren, nil
 		}
 
-		// Known vault. Same-vault collapse: drop the prefix so URLs stay
-		// clean and survive operator-side remounts.
-		if vaultID == currentVault {
-			prefix = ""
-		}
 		href := buildCrossVaultHref(prefix, path, fragment)
 
 		link := ast.NewLink()

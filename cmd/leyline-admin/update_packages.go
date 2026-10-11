@@ -96,10 +96,11 @@ func majorMinor(v string) string {
 	return v
 }
 
-// assetFileName reproduces the nfpm file_name_template:
-// <pkgName>_<version>_<goarch>.<ext>.
-func assetFileName(pkgName, ver, goarch, ext string) string {
-	return fmt.Sprintf("%s_%s_%s.%s", pkgName, ver, goarch, ext)
+// assetFileName reproduces the nfpm file_name_template: <pkgName>_<goarch>.<ext>.
+// Release artifacts are versionless — the version lives in the release tag, not
+// the filename — so this takes no version.
+func assetFileName(pkgName, goarch, ext string) string {
+	return fmt.Sprintf("%s_%s.%s", pkgName, goarch, ext)
 }
 
 // pickAsset returns the download URL of the release asset with the exact name.
@@ -210,7 +211,7 @@ func runUpdate(_ []string, opts runOpts) int {
 		if majorMinor(installedVer) != majorMinor(latest) {
 			minorBump = true
 		}
-		name := assetFileName(c.pkgName, latest, runtime.GOARCH, pm.ext)
+		name := assetFileName(c.pkgName, runtime.GOARCH, pm.ext)
 		url, found := pickAsset(rel, name)
 		if !found {
 			fmt.Fprintf(opts.Stdout, "%-15s %s → %s   no %s asset for %s\n",

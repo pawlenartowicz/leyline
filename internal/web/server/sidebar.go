@@ -196,9 +196,11 @@ func (d *PageDeps) resolveWidget(name string, pageTOC []render.TOCEntry) (Sideba
 				"vault", d.Vault.Name(), "widget", name, "err", err.Error())
 			return SidebarWidget{}, false
 		}
+		// No SourcePath: a widget is shown on every page and its file lives
+		// outside the content tree, so its relative links resolve against
+		// the vault root.
 		htmlStr, _, err := d.Markdown.Render(body, render.URLContext{
 			VaultPrefix: d.Vault.Prefix,
-			SourcePath:  name,
 			VaultID:     d.VaultID,
 			IDMap:       d.IDMap,
 		})

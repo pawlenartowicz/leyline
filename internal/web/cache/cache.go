@@ -5,14 +5,17 @@ import (
 	"sync"
 )
 
-// Key is the composite cache key. Two entries collide only when all five
+// Key is the composite cache key. Two entries collide only when all six
 // fields match. Mode keeps preview/edit/split renders distinct; Tag keeps
 // the same content rendered under different version selectors distinct
 // (the rendered HTML embeds `/@<tag>/...` URLs that depend on the active
-// tag even when the byte hash is identical).
+// tag even when the byte hash is identical). Path keeps byte-identical
+// files in different folders distinct: relative links in the rendered HTML
+// are resolved against the page's folder.
 type Key struct {
 	Epoch uint64
 	Vault string
+	Path  string
 	Hash  string
 	Mode  string
 	Tag   string

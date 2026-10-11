@@ -7,7 +7,7 @@ import (
 )
 
 // TOCEntry is one heading in a page's table of contents. Level is the heading
-// level (2 or 3); ID is the anchor goldmark's WithAutoHeadingID assigned to
+// level (2 or 3); ID is the anchor headingIDTransformer assigned to
 // the heading; Text is the heading's plain-text content (inline markup
 // stripped). Templates render `<a href="#{{.ID}}">{{.Text}}</a>`.
 type TOCEntry struct {
