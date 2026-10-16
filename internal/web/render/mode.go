@@ -51,16 +51,7 @@ func (m EditMode) AppendToURL(urlStr string) string {
 }
 
 func isExternalURL(s string) bool {
-	if strings.HasPrefix(s, "#") {
-		return true
-	}
-	if strings.HasPrefix(s, "mailto:") || strings.HasPrefix(s, "tel:") {
-		return true
-	}
-	if strings.Contains(s, "://") {
-		return true
-	}
-	return false
+	return strings.HasPrefix(s, "#") || uriSchemeRE.MatchString(s)
 }
 
 func mergeQueryParam(urlStr, key, value string) string {

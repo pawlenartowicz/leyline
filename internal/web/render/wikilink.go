@@ -20,10 +20,10 @@ import (
 // "ÜBERSICHT" against "übersicht".
 func caseFold(s string) string { return cases.Fold().String(s) }
 
-// escapeSegments percent-encodes each slash-delimited segment of rel, leaving
+// EscapeSegments percent-encodes each slash-delimited segment of rel, leaving
 // the separators untouched. Non-ASCII bytes become %XX so URLs survive proxies
 // and copy-paste; ASCII paths pass through unchanged.
-func escapeSegments(rel string) string {
+func EscapeSegments(rel string) string {
 	if rel == "" {
 		return ""
 	}
@@ -310,7 +310,7 @@ func (r *VaultWikilinkResolver) assetURL(rel string) string {
 // (og:image) so a configured card resolves to the same URL an embed of the
 // same file would.
 func AssetURL(prefix, rel string) string {
-	escaped := escapeSegments(rel)
+	escaped := EscapeSegments(rel)
 	if prefix == "/" || prefix == "" {
 		return "/" + escaped
 	}
@@ -336,7 +336,7 @@ func (r *VaultWikilinkResolver) urlFor(stem string) string {
 		stem = strings.TrimSuffix(stem, "index")
 		stem = strings.TrimSuffix(stem, "/")
 	}
-	escaped := escapeSegments(stem)
+	escaped := EscapeSegments(stem)
 	if r.prefix == "/" || r.prefix == "" {
 		if escaped == "" {
 			return "/"

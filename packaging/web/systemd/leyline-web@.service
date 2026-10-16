@@ -7,8 +7,7 @@ Wants=network-online.target
 Type=simple
 User=leyline
 Group=leyline
-WorkingDirectory=/opt/leyline-web/%i
-ExecStart=/usr/bin/leyline-web -config /opt/leyline-web/%i/config/config.yaml
+ExecStart=/usr/bin/leyline-web -config /etc/leyline-web/%i.yaml -themes /opt/leyline-web/themes/config/themes
 Restart=on-failure
 RestartSec=2
 
@@ -16,8 +15,9 @@ RestartSec=2
 # /var/cache/leyline-web/{pdf,search}: the engine derives them from
 # XDG_CACHE_HOME, and CacheDirectory= keeps that tree writable under
 # ProtectSystem=strict and owned by leyline:leyline. The instance reads its
-# config/themes under /opt/leyline-web/%i and the vault FS read-only — no
-# ReadWritePaths needed beyond the cache.
+# config (/etc/leyline-web/%i.yaml), the shared theme clone
+# (/opt/leyline-web/themes) and the vault FS read-only — no ReadWritePaths
+# needed beyond the cache.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

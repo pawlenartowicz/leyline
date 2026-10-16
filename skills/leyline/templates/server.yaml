@@ -1,0 +1,52 @@
+# leyline-server configuration.
+#
+# Only `vaults_dir` is strictly required; every other key has a default.
+# The values below are a sane production starting point for a single server
+# sitting behind a reverse proxy. Edit the paths and host to taste.
+
+server:
+  # Bind to loopback and let the reverse proxy terminate TLS and forward to
+  # this port. Bind 0.0.0.0 only if nothing fronts the server.
+  host: 127.0.0.1
+  port: 8090
+
+  # vault_idle_eviction: 30m   # in-memory vault state dropped after this idle
+  # pinned_vaults: []          # vault IDs hydrated at startup and never evicted
+
+# Required. Parent directory holding each vault as a plain subdirectory.
+vaults_dir: /var/lib/leyline/vaults
+
+# The registry records which vaults exist. It is mutated on `vault create`, so
+# it must be writable. Its default is <dir-of-this-config>/registry.toml, but if
+# this config lives in a read-only location (e.g. /etc under a hardened systemd
+# unit with ProtectSystem=strict), point it at a writable state directory.
+registry: /var/lib/leyline/registry.toml
+
+# admin_socket: /run/leyline/admin.sock   # UNIX socket for leyline-admin; mode 0600 is the auth boundary
+# trash_dir: /var/lib/leyline/vaults/.trash   # where destroyed vaults are moved
+
+# WebSocket / sync tuning. Defaults shown; uncomment to change.
+# sync:
+#   ping_interval: 30s
+#   ping_timeout: 10s
+#   push_rate_limit: 1            # pushes/sec/key
+#   failed_push_rate_limit: 5
+#   max_connections_per_key: 7
+#   allowed_origins: []          # WS Origin allowlist; empty rejects any Origin header present (CLI/Electron send none)
+
+# Daily git gc across hydrated vaults, UTC HH:MM. "" disables.
+git_gc_at: "05:00"
+
+# Commit-staging heuristics. Client pushes accumulate into a per-vault stage and
+# commit when any trigger fires. Defaults shown.
+# stage:
+#   quiet_window: 3s
+#   max_delay: 60s
+#   byte_cap: 52428800   # 50 MiB
+#   file_cap: 200
+#   compression: true    # WebSocket permessage-deflate
+
+# Per-vault DoS bounds. 0 disables. For guest-exposed vaults set real floors.
+# vault_limits:
+#   max_files: 0
+#   max_total_bytes: 0

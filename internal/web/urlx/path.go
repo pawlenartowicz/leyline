@@ -43,11 +43,6 @@ func ValidateRelPath(relPath string) error {
 	if strings.ContainsRune(relPath, '\\') {
 		return fmt.Errorf("backslash in path")
 	}
-	// Reject raw percent-encoded segments (%xx) — callers must decode first,
-	// and a % in a filename is almost always an encoding artefact or an attack.
-	if strings.ContainsRune(relPath, '%') {
-		return fmt.Errorf("percent character in path (encode traversal attempt or raw %%xx)")
-	}
 	for i, seg := range strings.Split(relPath, "/") {
 		if seg == "" || seg == "." || seg == ".." {
 			return fmt.Errorf("path %q contains forbidden segment %q", relPath, seg)

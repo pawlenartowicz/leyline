@@ -231,14 +231,17 @@ func runUpdate(_ []string, opts runOpts) int {
 		downloaded = append(downloaded, dst)
 	}
 
+	// The note comes before the install line because the install restarts
+	// running leyline-web instances, and a new engine on old themes can exit at
+	// start: the clone has to move first.
+	if minorBump {
+		fmt.Fprintln(opts.Stdout, "\nnote: this crosses a minor version — check out the matching minor tag in your web repo clone before you install. The install restarts leyline-web, and a new engine on old themes can fail to start.")
+	}
 	// One combined install command so a user can't update only some packages
 	// and end up running mismatched component versions against each other.
 	if len(downloaded) > 0 {
 		fmt.Fprintf(opts.Stdout, "\nrun:\nsudo %s %s %s\n",
 			pm.bin, pm.installCmd, strings.Join(downloaded, " "))
-	}
-	if minorBump {
-		fmt.Fprintln(opts.Stdout, "\nnote: this crosses a minor version — if it breaks your site, update your web repo clone to the matching minor too.")
 	}
 	return exitCode
 }

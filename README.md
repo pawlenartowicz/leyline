@@ -6,9 +6,11 @@ Self-hosted, collaborative sync for plain-file notes — Markdown-first, real-ti
 
 ## Versioning
 
-This is **0.3**. Every `0.3.*` release of `leyline` (server + CLI) **and** `leyline-web` is
-compatible with all other `0.3.*` releases — run matching minors across the server, CLI,
-web engine, and the [`web`](https://github.com/pawlenartowicz/web) theme clone (check it
-out at a `v0.3.*` tag). During the `0.x` prerelease a **minor** bump (`0.3` → `0.4`) may
-break compatibility; a **patch** bump (`0.3.1` → `0.3.2`) never does. Mixing minors — e.g.
-a `0.3` engine with `0.2` themes — is unsupported.
+Versions are `0.MINOR.PATCH`; the current one is the latest
+[release](https://github.com/pawlenartowicz/leyline/releases). Every release of `leyline`
+(server + CLI) **and** `leyline-web` is compatible with every other release of the same
+minor — run matching minors across the server, CLI, web engine, and the
+[`leyline-web`](https://github.com/pawlenartowicz/leyline-web) theme clone (check it out at a
+`v0.y.*` tag of that minor). During the `0.x` prerelease a **minor** bump (`0.y` → `0.(y+1)`)
+may break compatibility; a **patch** bump never does. Mixing minors — e.g. a newer engine
+with older themes — is unsupported.

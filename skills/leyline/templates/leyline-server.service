@@ -1,0 +1,36 @@
+[Unit]
+Description=leyline-server — WebSocket sync + REST admin for note vaults
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=leyline
+Group=leyline
+ExecStart=/usr/bin/leyline-server -config /etc/leyline/config.yaml
+Restart=on-failure
+RestartSec=2
+
+# StateDirectory creates and owns /var/lib/leyline and sets $STATE_DIRECTORY
+# (the write-ahead log lands there). RuntimeDirectory creates /run/leyline for
+# the admin UNIX socket.
+StateDirectory=leyline
+RuntimeDirectory=leyline
+ReadWritePaths=/var/lib/leyline
+
+# Hardening. ProtectSystem=strict makes the whole filesystem (including /etc)
+# read-only except the directories above — this is why the config points
+# `registry:` and `vaults_dir:` at /var/lib/leyline rather than under /etc.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

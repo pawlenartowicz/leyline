@@ -18,7 +18,7 @@ import (
 	"github.com/pawlenartowicz/leyline/internal/web/webignore"
 )
 
-var etagPattern = regexp.MustCompile(`^W/"[0-9a-f]+-[0-9a-f]{64}"$`)
+var etagPattern = regexp.MustCompile(`^W/"[0-9a-f]+-[0-9a-f]+-[0-9a-f]{64}"$`)
 
 func etagDeps(t *testing.T, f *fixtureBundle) *PageDeps {
 	t.Helper()

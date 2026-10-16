@@ -44,14 +44,6 @@ func TestValidateRelPath_RejectsExtendedBadInputs(t *testing.T) {
 		{"CR", "foo\rbar"},
 		// LF in path — header-injection vector.
 		{"LF", "foo\nbar"},
-		// Percent-encoded traversal — %2e%2e/ decodes to ../
-		// ValidateRelPath works on the decoded path, so the caller must
-		// percent-decode before calling; passing the raw %-encoded form
-		// should be rejected because neither '%' nor encoded dots are legal
-		// path segment characters in our restricted set. We test both the
-		// decoded form (already covered by "../etc/passwd") and the raw
-		// %-encoded form to ensure no accidental acceptance.
-		{"percent-traversal-raw", "%2e%2e/etc/passwd"},
 		// Windows reserved names with extension — CON.txt etc.
 		{"CON.txt", "CON.txt"},
 		{"NUL.log", "NUL.log"},
@@ -76,6 +68,8 @@ func TestValidateRelPath_Accepts(t *testing.T) {
 		"deeply/nested/path/note.md",
 		"image.png",
 		"folder-with-dashes/sub_folder/file.txt",
+		// The path arrives URL-decoded, so `%` is a literal filename character.
+		"100%/t.md",
 		// Leading `.leyline` is the one hidden component allowed — role
 		// gating (guardDotLeyline) decides who can actually read it.
 		".leyline/access",

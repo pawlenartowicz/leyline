@@ -224,7 +224,7 @@ func (headingIDTransformer) Transform(doc *ast.Document, reader text.Reader, _ p
 				return ast.WalkSkipChildren, nil
 			}
 		}
-		base := githubSlug(string(inlineText(reader.Source(), h)))
+		base := githubSlug(string(inlineText(reader.Source(), h, true)))
 		id := base
 		for used[id] {
 			next[base]++
@@ -272,7 +272,7 @@ func (titleExtractTransformer) Transform(doc *ast.Document, reader text.Reader, 
 	if !ok || h.Level != 1 {
 		return
 	}
-	pCtx.Set(extractedTitleKey, string(inlineText(reader.Source(), h)))
+	pCtx.Set(extractedTitleKey, string(inlineText(reader.Source(), h, false)))
 	doc.RemoveChild(doc, h)
 }
 
@@ -280,24 +280,39 @@ func (titleExtractTransformer) Transform(doc *ast.Document, reader text.Reader, 
 // and *ast.String are the leaves; everything else recurses into children. Net
 // effect: emphasis/strong markers dropped, link/wikilink labels preserved, code-
 // span content preserved, link destinations (URL bytes that aren't a child node)
-// dropped. Modeled after goldmark-obsidian/wikilink's writeNodeText; ast.Node's
-// own Text(src) method is deprecated in goldmark 1.8+.
-func inlineText(src []byte, n ast.Node) []byte {
+// dropped. Text outside code spans gets the backslash-escape and entity
+// resolution goldmark's HTML writer applies, so the result matches the rendered
+// text (`Q&amp;A` → `Q&A`). skipImages drops image alt text, which the rendered
+// heading's text content does not contain. Modeled after goldmark-obsidian/
+// wikilink's writeNodeText; ast.Node's own Text(src) method is deprecated in
+// goldmark 1.8+.
+func inlineText(src []byte, n ast.Node, skipImages bool) []byte {
 	var buf bytes.Buffer
-	var walk func(ast.Node)
-	walk = func(n ast.Node) {
+	var walk func(n ast.Node, inCode bool)
+	walk = func(n ast.Node, inCode bool) {
 		switch t := n.(type) {
 		case *ast.Text:
-			buf.Write(t.Segment.Value(src))
+			v := t.Segment.Value(src)
+			if !inCode {
+				v = util.ResolveEntityNames(util.ResolveNumericReferences(util.UnescapePunctuations(v)))
+			}
+			buf.Write(v)
+			return
 		case *ast.String:
 			buf.Write(t.Value)
-		default:
-			for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-				walk(c)
+			return
+		case *ast.Image:
+			if skipImages {
+				return
 			}
+		case *ast.CodeSpan:
+			inCode = true
+		}
+		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c, inCode)
 		}
 	}
-	walk(n)
+	walk(n, false)
 	return buf.Bytes()
 }
 
@@ -318,7 +333,7 @@ func (vaultPrefixTransformer) Transform(doc *ast.Document, _ text.Reader, pCtx p
 		return
 	}
 	prefix := buildLinkPrefix(urlCtx)
-	dir := escapeSegments(path.Dir(urlCtx.SourcePath))
+	dir := EscapeSegments(path.Dir(urlCtx.SourcePath))
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil

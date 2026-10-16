@@ -184,6 +184,17 @@ func TestRenderMarkdown_TitleExtract_InlineMarkup(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdown_TitleExtract_Entity(t *testing.T) {
+	r := NewMarkdownRenderer(MarkdownOptions{})
+	_, extracted, err := r.Render([]byte("# Q&amp;A \\*x\n"), URLContext{VaultPrefix: "/"})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if extracted != "Q&A *x" {
+		t.Errorf("extracted = %q, want \"Q&A *x\"", extracted)
+	}
+}
+
 func TestRenderMarkdown_TitleExtract_H2First(t *testing.T) {
 	r := NewMarkdownRenderer(MarkdownOptions{})
 	html, extracted, err := r.Render([]byte("## Subhead\n\nBody."), URLContext{VaultPrefix: "/"})
@@ -426,6 +437,9 @@ func TestRenderMarkdown_HeadingIDs(t *testing.T) {
 		{"empty result", "## ???", []string{`id="heading"`}},
 		{"setext", "Alpha Beta\n---", []string{`id="alpha-beta"`}},
 		{"block id kept", "## Title ^blk-1", []string{`id="^blk-1"`}},
+		{"entity resolved", "## Q&amp;A", []string{`id="qa"`}},
+		{"entity kept in code span", "## `a&amp;b`", []string{`id="aampb"`}},
+		{"image alt dropped", "## ![alt](i.png) Title", []string{`id="title"`}},
 	}
 	r := NewMarkdownRenderer(MarkdownOptions{})
 	for _, c := range cases {

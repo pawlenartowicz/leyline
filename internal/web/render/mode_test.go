@@ -47,6 +47,7 @@ func TestAppendToURL(t *testing.T) {
 		{"external untouched", ModeEdit, "https://example.com/x", "https://example.com/x"},
 		{"mailto untouched", ModeEdit, "mailto:a@b.c", "mailto:a@b.c"},
 		{"fragment-only untouched", ModeEdit, "#anchor", "#anchor"},
+		{"URL in query is still internal", ModeEdit, "/go?u=https://example.com/a", "/go?u=https://example.com/a&mode=edit"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

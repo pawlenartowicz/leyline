@@ -100,6 +100,9 @@ func TestBuildRedirectWithTag(t *testing.T) {
 		{"/", "v1", "foo", "/@v1/foo"},
 		{"/notes", "", "foo", "/notes/foo"},
 		{"/notes", "v1.0", "foo", "/notes/@v1.0/foo"},
+		{"/v", "", "c#d/t", "/v/c%23d/t"},
+		{"/v", "", "100%/", "/v/100%25/"},
+		{"/v", "v1", "c#d/t", "/v/@v1/c%23d/t"},
 	}
 	for _, c := range cases {
 		got := buildRedirectWithTag(c.prefix, c.tag, c.sub)

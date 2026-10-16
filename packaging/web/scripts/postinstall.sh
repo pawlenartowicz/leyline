@@ -1,9 +1,10 @@
 #!/bin/sh
 set -e
 
-# Parent dir for per-site clones. Untracked so uninstall never removes operator data.
-mkdir -p /opt/leyline-web
-chown leyline:leyline /opt/leyline-web 2>/dev/null || true
+# /etc/leyline-web holds one <instance>.yaml per site; /opt/leyline-web holds the
+# shared theme clone. Both are untracked so uninstall never removes operator data.
+# install -d sets the mode itself; mkdir -p would take it from the umask.
+install -d -m 0755 /etc/leyline-web /opt/leyline-web
 
 if command -v systemctl >/dev/null 2>&1; then
 	systemctl daemon-reload || true

@@ -2,7 +2,9 @@
 # seven repos (integration/Frog/demo/multi-repo deploy); those targets are dropped
 # — integration-tests is a deferred separate repo, and web/obsidian are siblings now.
 
-VERSION ?= 0.4.0
+# Local builds carry `git describe` (e.g. 0.8.0, 0.8.0-3-gabc123-dirty); release
+# builds get the tag from goreleaser. Outside a git checkout the version is "dev".
+VERSION ?= $(or $(patsubst v%,%,$(shell git describe --tags --dirty 2>/dev/null)),dev)
 LDFLAGS := -s -w -X github.com/pawlenartowicz/leyline/internal/buildinfo.Value=$(VERSION)
 
 .PHONY: build test vet snapshot install

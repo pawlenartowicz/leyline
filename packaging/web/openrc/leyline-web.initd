@@ -8,9 +8,8 @@ name="leyline-web ($instance)"
 description="Leyline web reader instance"
 
 command="/usr/bin/leyline-web"
-command_args="-config /opt/leyline-web/$instance/config/config.yaml"
+command_args="-config /etc/leyline-web/$instance.yaml -themes /opt/leyline-web/themes/config/themes"
 command_user="leyline:leyline"
-directory="/opt/leyline-web/$instance"
 command_background=true
 pidfile="/run/leyline-web.$instance.pid"
 output_log="/var/log/leyline-web.$instance.log"

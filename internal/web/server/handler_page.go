@@ -1206,7 +1206,10 @@ func buildPageURL(prefix, relPath string) string {
 	return prefix + "/" + stripped
 }
 
+// buildRedirect takes the decoded vault-relative sub and re-encodes it: a raw
+// `#` or `%` in a Location header would be read as a fragment or a broken escape.
 func buildRedirect(prefix, sub string) string {
+	sub = render.EscapeSegments(sub)
 	if prefix == "/" {
 		return "/" + sub
 	}
